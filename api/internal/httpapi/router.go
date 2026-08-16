@@ -10,12 +10,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/sdeitte/survivor-league-api/internal/auth"
+	"github.com/sdeitte/survivor-league-api/internal/leagues"
 )
 
 // Deps are the dependencies NewRouter needs to wire up routes/middleware.
 type Deps struct {
 	Pool              *pgxpool.Pool
 	AuthService       *auth.Service
+	LeaguesService    *leagues.Service
 	JWT               *auth.JWTIssuer
 	AppEnv            string // "development" | "production" — gates cookie Secure flag
 	CORSAllowedOrigin string
@@ -23,20 +25,22 @@ type Deps struct {
 
 // API holds the dependencies shared by the httpapi handlers/middleware.
 type API struct {
-	pool        *pgxpool.Pool
-	authService *auth.Service
-	jwt         *auth.JWTIssuer
-	appEnv      string
+	pool           *pgxpool.Pool
+	authService    *auth.Service
+	leaguesService *leagues.Service
+	jwt            *auth.JWTIssuer
+	appEnv         string
 }
 
 // NewRouter builds the full chi router: middleware stack, CORS, and all
-// routes for this phase (health, auth, me).
+// routes for this phase (health, auth, me, leagues/invites/conferences).
 func NewRouter(d Deps) http.Handler {
 	a := &API{
-		pool:        d.Pool,
-		authService: d.AuthService,
-		jwt:         d.JWT,
-		appEnv:      d.AppEnv,
+		pool:           d.Pool,
+		authService:    d.AuthService,
+		leaguesService: d.LeaguesService,
+		jwt:            d.JWT,
+		appEnv:         d.AppEnv,
 	}
 
 	r := chi.NewRouter()
@@ -68,6 +72,23 @@ func NewRouter(d Deps) http.Handler {
 
 	r.With(a.RequireAuth).Get("/me", a.handleGetMe)
 	r.With(a.RequireAuth).Patch("/me", a.handleUpdateMe)
+
+	r.Get("/conferences", a.handleListConferences)
+
+	r.With(a.RequireAuth).Post("/leagues", a.handleCreateLeague)
+	r.With(a.RequireAuth).Get("/leagues", a.handleListLeagues)
+
+	r.Route("/leagues/{id}", func(r chi.Router) {
+		r.With(a.RequireLeagueMember).Get("/", a.handleGetLeague)
+		r.With(a.RequireCommissioner).Patch("/", a.handleUpdateLeague)
+		r.With(a.RequireLeagueMember).Get("/members", a.handleListMembers)
+		r.With(a.RequireCommissioner).Delete("/members/{membershipId}", a.handleRemoveMember)
+		r.With(a.RequireCommissioner).Get("/invite", a.handleGetInviteCode)
+		r.With(a.RequireCommissioner).Post("/invite/regenerate", a.handleRegenerateInviteCode)
+	})
+
+	r.Get("/invites/{code}", a.handlePreviewInvite)
+	r.With(a.RequireAuth).Post("/invites/{code}/join", a.handleJoinByCode)
 
 	return r
 }

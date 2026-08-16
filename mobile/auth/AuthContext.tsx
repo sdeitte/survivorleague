@@ -15,6 +15,15 @@ interface AuthContextValue {
   logout: () => Promise<void>;
   /** Re-fetches GET /me (refreshing once on 401) and updates `user`. */
   refreshProfile: () => Promise<void>;
+  /**
+   * Calls fn with a valid access token, transparently refreshing once (via
+   * the refresh token in secure storage) on a 401 before giving up and
+   * clearing the session. Exposed so any screen can make an authenticated
+   * API call (leagues, invites, ...) without re-implementing the
+   * refresh-on-401 dance that api.ts's mobile client (no cookie jar)
+   * requires — same role as web's apiFetch wrapper.
+   */
+  authFetch: <T>(fn: (token: string) => Promise<T>) => Promise<T>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -133,7 +142,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [clearSession]);
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, register: registerFn, logout, refreshProfile }}>
+    <AuthContext.Provider
+      value={{ user, isLoading, login, register: registerFn, logout, refreshProfile, authFetch: callWithRefresh }}
+    >
       {children}
     </AuthContext.Provider>
   );

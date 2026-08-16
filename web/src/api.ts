@@ -30,6 +30,44 @@ export interface SessionResponse {
   user: User
 }
 
+export interface MembershipSummary {
+  id: string
+  role: 'commissioner' | 'player'
+  is_contestant: boolean
+  status: 'active' | 'eliminated'
+}
+
+export interface League {
+  id: string
+  name: string
+  season_year: number
+  conference: string
+  commissioner_user_id: string
+  status: 'active'
+  created_at: string
+  membership: MembershipSummary
+}
+
+export interface Member {
+  membership_id: string
+  user_id: string
+  display_name: string
+  role: 'commissioner' | 'player'
+  is_contestant: boolean
+  status: 'active' | 'eliminated'
+  joined_at: string
+}
+
+export interface InviteCodeResponse {
+  invite_code: string
+}
+
+export interface InvitePreviewResponse {
+  league_name: string
+  conference: string
+  season_year: number
+}
+
 export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -157,4 +195,57 @@ export async function getMe(): Promise<User> {
 
 export async function updateMe(input: { display_name: string }): Promise<User> {
   return apiFetch<User>('/me', { method: 'PATCH', body: input })
+}
+
+export async function listConferences(): Promise<string[]> {
+  const res = await rawFetch('/conferences', { skipAuthRetry: true })
+  return parseJsonOrThrow<string[]>(res)
+}
+
+export async function createLeague(input: {
+  name: string
+  season_year: number
+  conference: string
+}): Promise<League> {
+  return apiFetch<League>('/leagues', { method: 'POST', body: input })
+}
+
+export async function listLeagues(): Promise<League[]> {
+  return apiFetch<League[]>('/leagues')
+}
+
+export async function getLeague(id: string): Promise<League> {
+  return apiFetch<League>(`/leagues/${id}`)
+}
+
+export async function updateLeague(
+  id: string,
+  input: { name?: string; commissioner_is_contestant?: boolean },
+): Promise<League> {
+  return apiFetch<League>(`/leagues/${id}`, { method: 'PATCH', body: input })
+}
+
+export async function listMembers(leagueId: string): Promise<Member[]> {
+  return apiFetch<Member[]>(`/leagues/${leagueId}/members`)
+}
+
+export async function removeMember(leagueId: string, membershipId: string): Promise<void> {
+  await apiFetch<void>(`/leagues/${leagueId}/members/${membershipId}`, { method: 'DELETE' })
+}
+
+export async function getInviteCode(leagueId: string): Promise<InviteCodeResponse> {
+  return apiFetch<InviteCodeResponse>(`/leagues/${leagueId}/invite`)
+}
+
+export async function regenerateInviteCode(leagueId: string): Promise<InviteCodeResponse> {
+  return apiFetch<InviteCodeResponse>(`/leagues/${leagueId}/invite/regenerate`, { method: 'POST' })
+}
+
+export async function previewInvite(code: string): Promise<InvitePreviewResponse> {
+  const res = await rawFetch(`/invites/${encodeURIComponent(code)}`, { skipAuthRetry: true })
+  return parseJsonOrThrow<InvitePreviewResponse>(res)
+}
+
+export async function joinLeagueByCode(code: string): Promise<League> {
+  return apiFetch<League>(`/invites/${encodeURIComponent(code)}/join`, { method: 'POST' })
 }

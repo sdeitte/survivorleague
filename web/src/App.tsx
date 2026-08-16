@@ -5,6 +5,9 @@ import { HomePage } from './routes/HomePage'
 import { LoginPage } from './routes/LoginPage'
 import { RegisterPage } from './routes/RegisterPage'
 import { HealthCheckPage } from './routes/HealthCheckPage'
+import { CreateLeaguePage } from './routes/CreateLeaguePage'
+import { JoinLeaguePage } from './routes/JoinLeaguePage'
+import { LeagueDetailPage } from './routes/LeagueDetailPage'
 
 function App() {
   return (
@@ -18,6 +21,30 @@ function App() {
           element={
             <ProtectedRoute>
               <HomePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/leagues/new"
+          element={
+            <ProtectedRoute>
+              <CreateLeaguePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/leagues/join"
+          element={
+            <ProtectedRoute>
+              <JoinLeaguePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/leagues/:id"
+          element={
+            <ProtectedRoute>
+              <LeagueDetailPage />
             </ProtectedRoute>
           }
         />

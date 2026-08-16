@@ -81,6 +81,7 @@ type LeagueMembership struct {
 	BoughtBackBy     pgtype.UUID        `json:"bought_back_by"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	RemovedAt        pgtype.Timestamptz `json:"removed_at"`
 }
 
 type LeagueWeekResult struct {

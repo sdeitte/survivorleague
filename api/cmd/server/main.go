@@ -1,9 +1,11 @@
 // Command server starts the Survivor League HTTP API.
 //
-// Phase 1: auth (register/login/refresh/logout), GET/PATCH /me, and the
-// requireAuth/requireSiteAdmin middleware, alongside the /health check.
-// Route wiring lives in internal/httpapi; this file just reads
-// configuration from the environment and assembles dependencies.
+// Phase 1 added auth (register/login/refresh/logout), GET/PATCH /me, and
+// the requireAuth/requireSiteAdmin middleware. Phase 2 adds league CRUD,
+// membership, and the invite-code join flow, plus the
+// requireLeagueMember/requireCommissioner middleware. Route wiring lives in
+// internal/httpapi; this file just reads configuration from the
+// environment and assembles dependencies.
 package main
 
 import (
@@ -17,6 +19,7 @@ import (
 	"github.com/sdeitte/survivor-league-api/internal/db"
 	"github.com/sdeitte/survivor-league-api/internal/db/gen"
 	"github.com/sdeitte/survivor-league-api/internal/httpapi"
+	"github.com/sdeitte/survivor-league-api/internal/leagues"
 )
 
 func getenv(key, fallback string) string {
@@ -56,10 +59,12 @@ func main() {
 	jwtIssuer := auth.NewJWTIssuer(jwtSecret)
 	queries := gen.New(pool)
 	authService := auth.NewService(queries, jwtIssuer, adminEmail)
+	leaguesService := leagues.NewService(queries, pool)
 
 	router := httpapi.NewRouter(httpapi.Deps{
 		Pool:              pool,
 		AuthService:       authService,
+		LeaguesService:    leaguesService,
 		JWT:               jwtIssuer,
 		AppEnv:            appEnv,
 		CORSAllowedOrigin: corsAllowedOrigin,

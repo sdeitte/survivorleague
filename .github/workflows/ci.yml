@@ -12,6 +12,27 @@ jobs:
     defaults:
       run:
         working-directory: api
+    # Postgres backs internal/leagues's integration tests (CreateLeague's
+    # transaction, the rejoin-after-removal upsert, etc.) — those tests
+    # self-skip (not fail) when DATABASE_URL is unreachable, but running a
+    # real service here means CI actually exercises them instead of
+    # silently skipping every run.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: survivor
+          POSTGRES_PASSWORD: survivor
+          POSTGRES_DB: survivor_league
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U survivor -d survivor_league"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://survivor:survivor@localhost:5432/survivor_league?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -22,6 +43,8 @@ jobs:
         run: go build ./...
       - name: go vet
         run: go vet ./...
+      - name: run migrations
+        run: go run ./cmd/migrate up
       - name: go test
         run: go test ./...
 

@@ -11,17 +11,50 @@ import (
 )
 
 type Querier interface {
+	CreateLeague(ctx context.Context, arg CreateLeagueParams) (League, error)
+	CreateLeagueMembership(ctx context.Context, arg CreateLeagueMembershipParams) (LeagueMembership, error)
 	CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) (RefreshToken, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	// Active = not revoked and not expired. Callers should treat "no rows" as
 	// "invalid or already-used token" without distinguishing why, to avoid
 	// leaking timing/existence information.
 	GetActiveRefreshTokenByHash(ctx context.Context, tokenHash string) (RefreshToken, error)
+	GetLeagueByID(ctx context.Context, id pgtype.UUID) (League, error)
+	GetLeagueByInviteCode(ctx context.Context, inviteCode string) (League, error)
+	// Excludes removed members by design: this backs requireLeagueMember, where
+	// a removed_at row must behave exactly like "never joined" (403).
+	GetMembershipByLeagueAndUser(ctx context.Context, arg GetMembershipByLeagueAndUserParams) (LeagueMembership, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
+	LeagueInviteCodeExists(ctx context.Context, inviteCode string) (bool, error)
+	ListActiveMembersWithUser(ctx context.Context, leagueID pgtype.UUID) ([]ListActiveMembersWithUserRow, error)
+	// Leagues the given user has a non-removed membership in, along with their
+	// role/is_contestant/status in each (GET /leagues needs both in one shot).
+	ListLeaguesForUser(ctx context.Context, userID pgtype.UUID) ([]ListLeaguesForUserRow, error)
+	// Soft-delete: only affects a currently-active (non-removed) row scoped to
+	// the given league, so this doubles as the "membership belongs to this
+	// league and isn't already removed" check — no rows back means 404/400 to
+	// the caller, not an error.
+	RemoveMembership(ctx context.Context, arg RemoveMembershipParams) (LeagueMembership, error)
 	RevokeRefreshToken(ctx context.Context, id pgtype.UUID) error
 	RevokeRefreshTokenByHash(ctx context.Context, tokenHash string) error
+	UpdateCommissionerIsContestant(ctx context.Context, arg UpdateCommissionerIsContestantParams) (LeagueMembership, error)
+	UpdateLeagueInviteCode(ctx context.Context, arg UpdateLeagueInviteCodeParams) (League, error)
+	UpdateLeagueName(ctx context.Context, arg UpdateLeagueNameParams) (League, error)
 	UpdateUserDisplayName(ctx context.Context, arg UpdateUserDisplayNameParams) (User, error)
+	// Handles both fresh joins and rejoin-after-removal against the
+	// UNIQUE(league_id, user_id) constraint in one statement:
+	//   - no existing row                     -> plain INSERT.
+	//   - existing row with removed_at set    -> DO UPDATE resets it to a fresh
+	//                                             active player membership (a
+	//                                             "new row" in spirit, even
+	//                                             though it reuses the id).
+	//   - existing row with removed_at IS NULL (still an active/eliminated
+	//     member) -> the DO UPDATE...WHERE guard doesn't match, so neither the
+	//     INSERT nor the UPDATE applies and RETURNING yields zero rows. Callers
+	//     treat "no rows" as "already a member" (409) — this also protects a
+	//     commissioner's own membership from ever being reset by this query.
+	UpsertLeagueMembershipOnJoin(ctx context.Context, arg UpsertLeagueMembershipOnJoinParams) (LeagueMembership, error)
 }
 
 var _ Querier = (*Queries)(nil)

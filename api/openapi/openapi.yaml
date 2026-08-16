@@ -6,12 +6,12 @@ info:
     source of truth for the shared TypeScript client generated into
     packages/api-client (consumed by both web and mobile).
 
-    Phase 1 adds auth (register/login/refresh/logout) and the current-user
-    endpoints. The full ~30-40 endpoint surface (leagues, conferences,
-    invites, schedule, picks, leaderboard, admin) is added incrementally in
-    later phases per the roadmap — see
+    Phase 1 added auth (register/login/refresh/logout) and the current-user
+    endpoints. Phase 2 adds league CRUD, membership, the invite-code join
+    flow, and the conferences list. Schedule, picks, leaderboard, and admin
+    are added incrementally in later phases per the roadmap — see
     /Users/sdeitte/.claude/plans/witty-questing-barto.md.
-  version: 0.1.0
+  version: 0.2.0
 servers:
   - url: http://localhost:8080
     description: Local development
@@ -255,6 +255,400 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /conferences:
+    get:
+      operationId: listConferences
+      summary: List the canonical FBS conferences leagues can be created for
+      description: >
+        Returns the hardcoded, stable list of FBS conference names (see
+        internal/schedule/conferences.go) that POST /leagues validates its
+        `conference` field against. This is deliberately not sourced from
+        `teams.conference` (which is empty until Phase 3's CFBD sync runs)
+        — league creation must not depend on schedule data that doesn't
+        exist yet.
+      security: []
+      tags:
+        - Conferences
+      responses:
+        "200":
+          description: The canonical FBS conference names
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                example: ["ACC", "Big 12", "Big Ten", "SEC"]
+
+  /leagues:
+    post:
+      operationId: createLeague
+      summary: Create a new league
+      description: >
+        Creates a league locked to the given conference/season_year for
+        its lifetime (both immutable after creation) with a fresh unique
+        invite_code, and — in the same transaction, with no separate join
+        step — the requester's own league_memberships row as
+        role=commissioner, is_contestant=true, status=active.
+      tags:
+        - Leagues
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLeagueRequest"
+      responses:
+        "201":
+          description: League created; requester is its commissioner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/League"
+        "400":
+          description: Missing name, season_year out of range, or conference not recognized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing, invalid, or expired access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    get:
+      operationId: listMyLeagues
+      summary: List leagues the requester belongs to
+      description: >
+        Leagues the requester has a non-removed membership in, each with
+        their role/is_contestant/status in that league.
+      tags:
+        - Leagues
+      responses:
+        "200":
+          description: The requester's leagues
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/League"
+        "401":
+          description: Missing, invalid, or expired access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /leagues/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getLeague
+      summary: Get league detail
+      description: Requires a non-removed membership in the league (requireLeagueMember).
+      tags:
+        - Leagues
+      responses:
+        "200":
+          description: League detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/League"
+        "403":
+          description: Not a member of this league
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: League not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateLeague
+      summary: Update a league (commissioner only)
+      description: >
+        Requires the requester's membership in this league to have
+        role=commissioner (requireCommissioner). `name` renames the
+        league. `commissioner_is_contestant` updates *the commissioner's
+        own* membership is_contestant flag — not a general member-editing
+        mechanism. `conference` and `season_year` are immutable: including
+        either key in the request body (even set to its current value) is
+        rejected with 400.
+      tags:
+        - Leagues
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateLeagueRequest"
+      responses:
+        "200":
+          description: Updated league
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/League"
+        "400":
+          description: Empty name, invalid field type, or an attempt to change conference/season_year
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not the league's commissioner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: League not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /leagues/{id}/members:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: listLeagueMembers
+      summary: List a league's non-removed members
+      description: Requires a non-removed membership in the league (requireLeagueMember). Never exposes other members' emails.
+      tags:
+        - Leagues
+      responses:
+        "200":
+          description: The league's active (non-removed) members
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Member"
+        "403":
+          description: Not a member of this league
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: League not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /leagues/{id}/members/{membershipId}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: membershipId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      operationId: removeLeagueMember
+      summary: Remove a member from a league (commissioner only)
+      description: >
+        Requires role=commissioner (requireCommissioner). Soft-delete:
+        sets removed_at on the membership row rather than deleting it
+        (picks FK to league_membership_id in later phases). The removed
+        member can rejoin later via the invite code — see
+        POST /invites/{code}/join.
+      tags:
+        - Leagues
+      responses:
+        "204":
+          description: Member removed
+        "400":
+          description: membershipId does not resolve to a currently-active member of this league
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not the league's commissioner, or attempting to remove the commissioner's own membership
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: League not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /leagues/{id}/invite:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getInviteCode
+      summary: Get a league's current invite code (commissioner only)
+      description: Requires role=commissioner (requireCommissioner).
+      tags:
+        - Invites
+      responses:
+        "200":
+          description: The league's current invite code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InviteCodeResponse"
+        "403":
+          description: Not the league's commissioner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: League not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /leagues/{id}/invite/regenerate:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: regenerateInviteCode
+      summary: Regenerate a league's invite code (commissioner only)
+      description: >
+        Requires role=commissioner (requireCommissioner). Generates a
+        fresh unique code and overwrites the stored one — the old code
+        stops working immediately (it isn't a multi-valued list, just a
+        single column).
+      tags:
+        - Invites
+      responses:
+        "200":
+          description: The league's new invite code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InviteCodeResponse"
+        "403":
+          description: Not the league's commissioner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: League not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /invites/{code}:
+    parameters:
+      - name: code
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: previewInvite
+      summary: Preview a league by invite code
+      description: >
+        Public — lets someone see what league they're being invited to
+        before registering or logging in.
+      security: []
+      tags:
+        - Invites
+      responses:
+        "200":
+          description: The invited league's public preview info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvitePreviewResponse"
+        "404":
+          description: Invite code not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /invites/{code}/join:
+    parameters:
+      - name: code
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: joinLeagueByCode
+      summary: Join a league via its invite code
+      description: >
+        Creates an active role=player, is_contestant=true membership for
+        the requester. If the requester's only prior membership in this
+        league was removed by the commissioner (removed_at set), this
+        reactivates that same row as a fresh active membership rather
+        than erroring on the underlying UNIQUE(league_id, user_id)
+        constraint — rejoining after removal is explicitly supported.
+      tags:
+        - Invites
+      responses:
+        "200":
+          description: Joined (or rejoined) the league
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/League"
+        "401":
+          description: Missing, invalid, or expired access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Invite code not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Requester already has an active (non-removed) membership in this league
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -367,3 +761,145 @@ components:
             here and store it via expo-secure-store.
         user:
           $ref: "#/components/schemas/User"
+
+    CreateLeagueRequest:
+      type: object
+      required:
+        - name
+        - season_year
+        - conference
+      properties:
+        name:
+          type: string
+        season_year:
+          type: integer
+          minimum: 2000
+          maximum: 2100
+        conference:
+          type: string
+          description: Must exactly (case-sensitive) match one of the names returned by GET /conferences.
+
+    UpdateLeagueRequest:
+      type: object
+      description: >
+        conference/season_year are deliberately absent from this schema —
+        both are immutable, and including either key in the request body
+        at all (regardless of value) is rejected with 400.
+      properties:
+        name:
+          type: string
+        commissioner_is_contestant:
+          type: boolean
+          description: Updates the *acting commissioner's own* membership is_contestant flag only.
+
+    MembershipSummary:
+      type: object
+      description: The requester's own role/status within a league.
+      required:
+        - id
+        - role
+        - is_contestant
+        - status
+      properties:
+        id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [commissioner, player]
+        is_contestant:
+          type: boolean
+        status:
+          type: string
+          enum: [active, eliminated]
+
+    League:
+      type: object
+      description: >
+        Returned by every endpoint that hands back a league together with
+        the requester's membership in it (create, list, get, update,
+        join). Deliberately omits invite_code — that's only exposed via
+        GET/POST /leagues/{id}/invite....
+      required:
+        - id
+        - name
+        - season_year
+        - conference
+        - commissioner_user_id
+        - status
+        - created_at
+        - membership
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        season_year:
+          type: integer
+        conference:
+          type: string
+        commissioner_user_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [active]
+        created_at:
+          type: string
+          format: date-time
+        membership:
+          $ref: "#/components/schemas/MembershipSummary"
+
+    Member:
+      type: object
+      required:
+        - membership_id
+        - user_id
+        - display_name
+        - role
+        - is_contestant
+        - status
+        - joined_at
+      properties:
+        membership_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+        role:
+          type: string
+          enum: [commissioner, player]
+        is_contestant:
+          type: boolean
+        status:
+          type: string
+          enum: [active, eliminated]
+        joined_at:
+          type: string
+          format: date-time
+
+    InviteCodeResponse:
+      type: object
+      required:
+        - invite_code
+      properties:
+        invite_code:
+          type: string
+
+    InvitePreviewResponse:
+      type: object
+      required:
+        - league_name
+        - conference
+        - season_year
+      properties:
+        league_name:
+          type: string
+        conference:
+          type: string
+        season_year:
+          type: integer

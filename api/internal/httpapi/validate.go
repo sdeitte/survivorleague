@@ -21,3 +21,15 @@ const minPasswordLength = 8
 func validatePassword(password string) bool {
 	return len(password) >= minPasswordLength
 }
+
+// Reasonable bounds for a league's season_year, per the Phase 2 API
+// contract — not tied to any real calendar logic, just guards against
+// garbage input (e.g. 0 or a typo'd extra digit).
+const (
+	minSeasonYear = 2000
+	maxSeasonYear = 2100
+)
+
+func validateSeasonYear(year int32) bool {
+	return year >= minSeasonYear && year <= maxSeasonYear
+}

@@ -5,25 +5,35 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import { LoginScreen } from './screens/LoginScreen';
 import { RegisterScreen } from './screens/RegisterScreen';
-import { HomeScreen } from './screens/HomeScreen';
 import { HealthScreen } from './screens/HealthScreen';
+import { MyLeaguesScreen } from './screens/MyLeaguesScreen';
+import { CreateLeagueScreen } from './screens/CreateLeagueScreen';
+import { JoinLeagueScreen } from './screens/JoinLeagueScreen';
+import { LeagueDetailScreen } from './screens/LeagueDetailScreen';
 
 const queryClient = new QueryClient();
 
-// Phase 1 is small enough (4 screens, no deep linking needs yet) that a
-// hand-rolled state machine is simpler than pulling in React Navigation —
-// revisit once the picks/leagues screens in later phases need real nested
-// navigation.
-type Screen = 'login' | 'register' | 'home' | 'health';
+// A hand-rolled state machine remains simpler than pulling in React
+// Navigation for this screen count, even as Phase 2 adds four more
+// screens on top of Phase 1's — 'leagueDetail' carries a selectedLeagueId
+// alongside the screen tag since it's the one screen that needs a param.
+type Screen =
+  | { name: 'login' }
+  | { name: 'register' }
+  | { name: 'health' }
+  | { name: 'myLeagues' }
+  | { name: 'createLeague' }
+  | { name: 'joinLeague' }
+  | { name: 'leagueDetail'; leagueId: string };
 
 function Root() {
   const { user, isLoading } = useAuth();
-  const [screen, setScreen] = useState<Screen>('login');
+  const [screen, setScreen] = useState<Screen>({ name: 'login' });
 
   // Reset to a sane default screen on sign-in/sign-out so e.g. logging out
-  // from the health screen doesn't strand the next session there.
+  // from a league detail screen doesn't strand the next session there.
   useEffect(() => {
-    setScreen(user ? 'home' : 'login');
+    setScreen(user ? { name: 'myLeagues' } : { name: 'login' });
   }, [user]);
 
   if (isLoading) {
@@ -35,18 +45,42 @@ function Root() {
   }
 
   if (!user) {
-    return screen === 'register' ? (
-      <RegisterScreen onNavigateToLogin={() => setScreen('login')} />
+    return screen.name === 'register' ? (
+      <RegisterScreen onNavigateToLogin={() => setScreen({ name: 'login' })} />
     ) : (
-      <LoginScreen onNavigateToRegister={() => setScreen('register')} />
+      <LoginScreen onNavigateToRegister={() => setScreen({ name: 'register' })} />
     );
   }
 
-  if (screen === 'health') {
-    return <HealthScreen onBack={() => setScreen('home')} />;
+  switch (screen.name) {
+    case 'health':
+      return <HealthScreen onBack={() => setScreen({ name: 'myLeagues' })} />;
+    case 'createLeague':
+      return (
+        <CreateLeagueScreen
+          onCreated={(leagueId) => setScreen({ name: 'leagueDetail', leagueId })}
+          onCancel={() => setScreen({ name: 'myLeagues' })}
+        />
+      );
+    case 'joinLeague':
+      return (
+        <JoinLeagueScreen
+          onJoined={(leagueId) => setScreen({ name: 'leagueDetail', leagueId })}
+          onCancel={() => setScreen({ name: 'myLeagues' })}
+        />
+      );
+    case 'leagueDetail':
+      return <LeagueDetailScreen leagueId={screen.leagueId} onBack={() => setScreen({ name: 'myLeagues' })} />;
+    default:
+      return (
+        <MyLeaguesScreen
+          onNavigateToCreate={() => setScreen({ name: 'createLeague' })}
+          onNavigateToJoin={() => setScreen({ name: 'joinLeague' })}
+          onNavigateToLeague={(leagueId) => setScreen({ name: 'leagueDetail', leagueId })}
+          onNavigateToHealth={() => setScreen({ name: 'health' })}
+        />
+      );
   }
-
-  return <HomeScreen onNavigateToHealth={() => setScreen('health')} />;
 }
 
 export default function App() {
