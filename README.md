@@ -12,9 +12,12 @@ untouched as a reference only.
 **Source of truth for scope, data model, and rationale:**
 `/Users/sdeitte/.claude/plans/witty-questing-barto.md`
 
-Current status: **Phase 0 — scaffolding only.** No feature logic (auth,
-leagues, picks, grading) exists yet; see the plan's "Phased Build Roadmap"
-section for what's next.
+Current status: **Phase 1 — auth & accounts.** Register/login/refresh/
+logout, argon2id password hashing, JWT access tokens + rotating refresh
+tokens, `requireAuth`/`requireSiteAdmin` middleware, and matching login/
+register/home screens on web + mobile are in place. Leagues, picks,
+schedule ingestion, and grading are still ahead — see the plan's "Phased
+Build Roadmap" section for what's next.
 
 ## Repo structure
 
@@ -61,11 +64,14 @@ go run ./cmd/migrate up
 ```sh
 cd api
 export DATABASE_URL="postgres://survivor:survivor@localhost:5432/survivor_league?sslmode=disable"
+export JWT_SECRET="dev-only-insecure-secret-change-me"
 go run ./cmd/server
 # GET http://localhost:8080/health -> {"status":"ok","db":"ok"}
 ```
 
-See `api/README.md` for env vars, build/vet, and migration details.
+See the root `.env.example` and `api/README.md` for the full env var list
+(JWT_SECRET, ADMIN_EMAIL, APP_ENV, CORS_ALLOWED_ORIGIN), build/vet/test, and
+migration details.
 
 ### 4. Run the web app
 
@@ -90,8 +96,9 @@ testing on a physical device).
 
 ## CI
 
-`.github/workflows/ci.yml` runs `go build`/`go vet` for `api/` and
-`npm ci && npm run build` for `web/` on every push/PR. No deploy step yet.
+`.github/workflows/ci.yml` runs, on every push/PR: `go build`/`go vet`/
+`go test` for `api/`, `npm ci && npm run build` for `web/`, and
+`npm ci && npx tsc --noEmit` for `mobile/`. No deploy step yet.
 
 ## Deployment
 

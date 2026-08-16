@@ -1,7 +1,4 @@
-// Package httpapi wires chi routes, middleware (auth/member/commissioner/
-// site-admin), and HTTP handlers.
-//
-// Phase 0 scaffolding only — no implementation yet. See the roadmap in
-// /Users/sdeitte/.claude/plans/witty-questing-barto.md for what lands here
-// in later phases.
+// Package httpapi wires chi routes, middleware (auth/site-admin — league
+// member/commissioner middleware lands in Phase 2), and HTTP handlers on
+// top of internal/auth and the sqlc-generated internal/db/gen layer.
 package httpapi

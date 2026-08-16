@@ -46,6 +46,13 @@ services:
       - key: JWT_SECRET
         value: ${JWT_SECRET}
         type: SECRET
+      - key: APP_ENV
+        value: production
+      - key: ADMIN_EMAIL
+        value: ${ADMIN_EMAIL}
+        type: SECRET
+      - key: CORS_ALLOWED_ORIGIN
+        value: ${web.PUBLIC_URL}
       - key: CFBD_API_KEY
         value: ${CFBD_API_KEY}
         type: SECRET

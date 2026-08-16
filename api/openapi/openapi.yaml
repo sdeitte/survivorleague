@@ -6,14 +6,17 @@ info:
     source of truth for the shared TypeScript client generated into
     packages/api-client (consumed by both web and mobile).
 
-    Phase 0: only /health is documented. The full ~30-40 endpoint surface
-    (auth, users, leagues, conferences, invites, schedule, picks,
-    leaderboard, admin) is added incrementally in later phases per the
-    roadmap — see /Users/sdeitte/.claude/plans/witty-questing-barto.md.
-  version: 0.0.1
+    Phase 1 adds auth (register/login/refresh/logout) and the current-user
+    endpoints. The full ~30-40 endpoint surface (leagues, conferences,
+    invites, schedule, picks, leaderboard, admin) is added incrementally in
+    later phases per the roadmap — see
+    /Users/sdeitte/.claude/plans/witty-questing-barto.md.
+  version: 0.1.0
 servers:
   - url: http://localhost:8080
     description: Local development
+security:
+  - bearerAuth: []
 paths:
   /health:
     get:
@@ -22,6 +25,7 @@ paths:
       description: >
         Returns 200 with db=ok when the API can reach Postgres, or a 503
         with an error message otherwise.
+      security: []
       tags:
         - System
       responses:
@@ -37,7 +41,226 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
+
+  /auth/register:
+    post:
+      operationId: registerUser
+      summary: Create a new account and start a session
+      description: >
+        Validates email format and a minimum-8-character password, hashes
+        the password with argon2id, and creates the user. If `email`
+        case-insensitively matches the server's configured ADMIN_EMAIL, the
+        new user is created with is_site_admin=true. On success, behaves
+        exactly like POST /auth/login: an access token is returned in the
+        body and a rotating refresh token is both set as an httpOnly cookie
+        (used by the web client) and included in the body (used by the
+        mobile client, which has no cookie jar to read Set-Cookie from).
+        There is no email-verification gate in this phase.
+      security: []
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Account created; session started
+          headers:
+            Set-Cookie:
+              description: >
+                Sets the `refresh_token` cookie (httpOnly, SameSite=Strict,
+                Secure in production).
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionResponse"
+        "400":
+          description: Invalid email, weak password, or missing display_name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Email already registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/login:
+    post:
+      operationId: loginUser
+      summary: Authenticate and start a session
+      description: >
+        Verifies the argon2id password hash. On success, issues a 15-minute
+        JWT access token (HS256, claims include sub and is_site_admin) and
+        a 30-day rotating refresh token — stored server-side as a SHA-256
+        hash, set client-side as an httpOnly `refresh_token` cookie
+        (SameSite=Strict, Secure in production) for web, and also returned
+        in the body for mobile (no cookie jar to read Set-Cookie from).
+      security: []
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Authenticated; session started
+          headers:
+            Set-Cookie:
+              description: Sets the `refresh_token` cookie.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionResponse"
+        "400":
+          description: Missing email or password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Invalid email or password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/refresh:
+    post:
+      operationId: refreshSession
+      summary: Rotate the refresh token and mint a new access token
+      description: >
+        Reads the refresh token from the `refresh_token` cookie if present,
+        else from the JSON body (mobile has no cookie jar and sends it
+        explicitly). The presented token must match a non-revoked,
+        non-expired row; on success it is revoked (rotated) and a new
+        access/refresh pair is issued and stored. Reusing an
+        already-rotated, expired, or unknown token always fails with 401. A
+        new `refresh_token` cookie is set regardless of caller type
+        (harmless for mobile, required for web).
+      security: []
+      tags:
+        - Auth
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "200":
+          description: Session refreshed
+          headers:
+            Set-Cookie:
+              description: Sets the new `refresh_token` cookie.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionResponse"
+        "401":
+          description: Missing, invalid, expired, or already-used refresh token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/logout:
+    post:
+      operationId: logoutUser
+      summary: End the current session
+      description: >
+        Reads the refresh token the same dual cookie/body way as
+        POST /auth/refresh and revokes it (a missing/unknown token is a
+        no-op, not an error). Clears the `refresh_token` cookie.
+      security: []
+      tags:
+        - Auth
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "204":
+          description: Session ended
+          headers:
+            Set-Cookie:
+              description: Clears the `refresh_token` cookie.
+              schema:
+                type: string
+
+  /me:
+    get:
+      operationId: getMe
+      summary: Get the current user
+      tags:
+        - Users
+      responses:
+        "200":
+          description: The authenticated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Missing, invalid, or expired access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateMe
+      summary: Update the current user's profile
+      description: Only display_name is editable in this phase.
+      tags:
+        - Users
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateMeRequest"
+      responses:
+        "200":
+          description: The updated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: Missing display_name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing, invalid, or expired access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   schemas:
     HealthResponse:
       type: object
@@ -53,3 +276,94 @@ components:
           enum: [ok, error]
         error:
           type: string
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+
+    RegisterRequest:
+      type: object
+      required:
+        - email
+        - password
+        - display_name
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+        display_name:
+          type: string
+
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+
+    RefreshRequest:
+      type: object
+      description: >
+        Only used by clients without a cookie jar (mobile). Web clients
+        rely on the httpOnly cookie and may send an empty body.
+      properties:
+        refresh_token:
+          type: string
+
+    UpdateMeRequest:
+      type: object
+      required:
+        - display_name
+      properties:
+        display_name:
+          type: string
+
+    User:
+      type: object
+      required:
+        - id
+        - email
+        - display_name
+        - is_site_admin
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+        is_site_admin:
+          type: boolean
+
+    SessionResponse:
+      type: object
+      required:
+        - access_token
+        - user
+      properties:
+        access_token:
+          type: string
+          description: 15-minute JWT (HS256).
+        refresh_token:
+          type: string
+          description: >
+            Present on all three token-issuing endpoints. Web clients
+            ignore this field and rely on the httpOnly cookie (also always
+            set); mobile clients, which have no cookie jar, read it from
+            here and store it via expo-secure-store.
+        user:
+          $ref: "#/components/schemas/User"

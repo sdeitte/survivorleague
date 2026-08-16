@@ -7,7 +7,7 @@ on:
 
 jobs:
   api:
-    name: api (build + vet)
+    name: api (build + vet + test)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -22,6 +22,8 @@ jobs:
         run: go build ./...
       - name: go vet
         run: go vet ./...
+      - name: go test
+        run: go test ./...
 
   web:
     name: web (build)
@@ -40,3 +42,21 @@ jobs:
         run: npm ci
       - name: npm run build
         run: npm run build
+
+  mobile:
+    name: mobile (typecheck)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: npm ci
+        run: npm ci
+      - name: tsc --noEmit
+        run: npx tsc --noEmit

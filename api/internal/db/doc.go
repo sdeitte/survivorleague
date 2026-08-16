@@ -1,7 +1,8 @@
-// Package db holds the sqlc-generated database access layer and pgx
-// connection pooling.
+// Package db holds the sqlc-generated database access layer (in the gen
+// subpackage) plus small pgx/pgtype helpers shared across internal
+// packages (UUID conversion, pool setup).
 //
-// Phase 0 scaffolding only — no implementation yet. See the roadmap in
-// /Users/sdeitte/.claude/plans/witty-questing-barto.md for what lands here
-// in later phases.
+// Query definitions live in queries/*.sql; `sqlc generate` (run from
+// api/, see sqlc.yaml) regenerates gen/*.go from them — gen/ is
+// committed but never hand-edited.
 package db
