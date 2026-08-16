@@ -1,0 +1,55 @@
+openapi: 3.1.0
+info:
+  title: Survivor League API
+  description: >
+    REST API for the College Football Survivor Pool app. This spec is the
+    source of truth for the shared TypeScript client generated into
+    packages/api-client (consumed by both web and mobile).
+
+    Phase 0: only /health is documented. The full ~30-40 endpoint surface
+    (auth, users, leagues, conferences, invites, schedule, picks,
+    leaderboard, admin) is added incrementally in later phases per the
+    roadmap — see /Users/sdeitte/.claude/plans/witty-questing-barto.md.
+  version: 0.0.1
+servers:
+  - url: http://localhost:8080
+    description: Local development
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Liveness/readiness check
+      description: >
+        Returns 200 with db=ok when the API can reach Postgres, or a 503
+        with an error message otherwise.
+      tags:
+        - System
+      responses:
+        "200":
+          description: API and database are healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "503":
+          description: API is up but the database is unreachable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - db
+      properties:
+        status:
+          type: string
+          enum: [ok, error]
+        db:
+          type: string
+          enum: [ok, error]
+        error:
+          type: string

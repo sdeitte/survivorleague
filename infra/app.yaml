@@ -1,0 +1,74 @@
+# DigitalOcean App Platform spec — Phase 0 scaffolding only.
+#
+# This is a CONFIG FILE, not a deployment action. No `doctl` command has
+# been run against it and no real DO resources exist yet. Real deploy
+# happens later per the plan's roadmap (Phase 0 roadmap item: "a real
+# end-to-end DO deploy of hello world before feature work starts" — that
+# step is still pending manual/CLI execution outside this scaffold).
+#
+# Postgres is NOT declared here — per the plan's Hosting section, it's
+# provisioned separately as a DO Managed PostgreSQL database resource
+# (not an App Platform component) and wired in via the DATABASE_URL
+# secret reference below.
+#
+# All ${...} values are placeholder secret references, not real
+# credentials — App Platform resolves `${VAR}`-style bindings against
+# encrypted secrets configured in the app/component settings, either via
+# `doctl apps update` / the control panel, or a separate (untracked)
+# secrets file passed at deploy time. Nothing here is a live value.
+
+name: survivor-league
+region: nyc
+
+services:
+  - name: api
+    github:
+      repo: sdeitte/survivor-league # placeholder — update once a remote exists
+      branch: main
+      deploy_on_push: true
+    source_dir: api
+    dockerfile_path: api/Dockerfile # placeholder — add a Dockerfile when Phase 0's DO deploy step is executed
+    http_port: 8080
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    routes:
+      - path: /
+    health_check:
+      http_path: /health
+      initial_delay_seconds: 10
+      period_seconds: 10
+    envs:
+      - key: PORT
+        value: "8080"
+      - key: DATABASE_URL
+        value: ${survivor-league-db.DATABASE_URL}
+        type: SECRET
+      - key: JWT_SECRET
+        value: ${JWT_SECRET}
+        type: SECRET
+      - key: CFBD_API_KEY
+        value: ${CFBD_API_KEY}
+        type: SECRET
+
+static_sites:
+  - name: web
+    github:
+      repo: sdeitte/survivor-league # placeholder — update once a remote exists
+      branch: main
+      deploy_on_push: true
+    source_dir: web
+    build_command: npm ci && npm run build
+    output_dir: dist
+    routes:
+      - path: /
+    envs:
+      - key: VITE_API_BASE_URL
+        value: ${api.PUBLIC_URL}
+
+# Managed database (referenced above via ${survivor-league-db.DATABASE_URL}):
+# provisioned as a separate DO Managed PostgreSQL resource (`doctl databases
+# create`), NOT as an App Platform "databases:" component tied to this app's
+# lifecycle — keeps the DB alive independently of app redeploys/teardowns.
+# Example (not executed by this scaffold):
+#   doctl databases create survivor-league-db --engine pg --version 16 \
+#     --region nyc --size db-s-1vcpu-1gb
