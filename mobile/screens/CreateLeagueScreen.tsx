@@ -105,6 +105,11 @@ export function CreateLeagueScreen({
           )}
         />
         {errors.conference && <Text style={styles.error}>{errors.conference.message}</Text>}
+        {!conferencesLoading && !conferencesError && conferences?.length === 0 && (
+          <Text style={styles.emptyHint}>
+            No conferences available yet — a schedule sync needs to run first (site admins: see Admin → Sync).
+          </Text>
+        )}
         {conferencesError && (
           <Text style={styles.error}>
             {conferencesError instanceof ApiError
@@ -157,6 +162,10 @@ const styles = StyleSheet.create({
   },
   hint: {
     color: '#64748b',
+    fontSize: 11,
+  },
+  emptyHint: {
+    color: '#f59e0b',
     fontSize: 11,
   },
   input: {

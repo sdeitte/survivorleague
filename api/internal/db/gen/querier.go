@@ -59,6 +59,16 @@ type Querier interface {
 	CreateSyncRun(ctx context.Context, arg CreateSyncRunParams) (SyncRun, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteDeviceToken(ctx context.Context, arg DeleteDeviceTokenParams) error
+	// Best-effort cleanup for a week that CFBD's calendar lists as
+	// seasonType=regular (so SyncSeason inserts it) but that turned out to
+	// have zero actual games attached — e.g. a scheduling-gap week CFBD
+	// reports between the end of regular-season play and conference
+	// championship week. Deleting is safe: every FK into weeks (games,
+	// picks, league_memberships.eliminated_week_id, league_week_results) is
+	// ON DELETE RESTRICT, so this is a genuine no-op (0 rows affected, no
+	// error) for any week that has real games or history attached, not just
+	// for ones with zero games right now.
+	DeleteWeekIfNoGames(ctx context.Context, id pgtype.UUID) (int64, error)
 	// game_id may be a NULL narg (the missed-pick case — nothing to point
 	// eliminated_game_id at).
 	EliminateMembership(ctx context.Context, arg EliminateMembershipParams) (LeagueMembership, error)
@@ -211,6 +221,19 @@ type Querier interface {
 	// postponed/canceled, all final) before a league's week can finalize.
 	ListConferenceRelevantGamesForWeek(ctx context.Context, arg ListConferenceRelevantGamesForWeekParams) ([]Game, error)
 	ListDeviceTokensForUser(ctx context.Context, userID pgtype.UUID) ([]DeviceToken, error)
+	// Conferences a league can be created for: real FBS conferences with
+	// enough member teams to sustain a ~13-week survivor season, excluding
+	// FBS Independents (not a real conference — its members don't play each
+	// other on a fixed schedule, so it can't anchor a conference-scoped
+	// pool). The 13-team minimum and the Independents exclusion were both
+	// explicit product decisions after post-realignment data showed Conference
+	// USA/Mountain West/Pac-12 had shrunk to single digits. Computed live from
+	// teams.conference (not a hardcoded list) so this stays correct through
+	// future realignment without a code change — see
+	// internal/schedule/conferences.go's FBSConferences for the separate,
+	// still-hardcoded canonical name list this filters against (used for CFBD
+	// normalization, not eligibility).
+	ListEligibleConferences(ctx context.Context, minTeams int32) ([]string, error)
 	// Joined with both teams' name/conference/logo so clients don't need N+1
 	// lookups per the GET /weeks/:id/games contract.
 	ListGamesByWeekWithTeams(ctx context.Context, weekID pgtype.UUID) ([]ListGamesByWeekWithTeamsRow, error)
@@ -257,6 +280,16 @@ type Querier interface {
 	// Test/verification + potential future admin-debugging helper: every
 	// outbox row for a user, newest first.
 	ListNotificationOutboxForUser(ctx context.Context, userID pgtype.UUID) ([]NotificationOutbox, error)
+	// Every week of the season for one membership (LEFT JOINed against that
+	// membership's pick, if any — a week with no pick still appears, with
+	// null pick/game/team/result/kickoff columns), with team/opponent names
+	// and home/away inline so the leaderboard's expandable per-contestant
+	// history doesn't need N+1 lookups. Backs GET
+	// .../members/{membershipId}/picks; the service/handler layer applies the
+	// same pre-lock privacy rule ListPicksByWeekForLeague's callers do (hiding
+	// every pick-identifying field, not just team_id, for another member's
+	// not-yet-started pick) — this query itself doesn't know who's asking.
+	ListPicksByMembershipForSeason(ctx context.Context, arg ListPicksByMembershipForSeasonParams) ([]ListPicksByMembershipForSeasonRow, error)
 	// Every non-removed member of the league with their pick status for the
 	// given week (LEFT JOINed — members with no pick yet still appear, with
 	// null pick/game/team/kickoff columns). Backs GET .../picks; the service
@@ -317,6 +350,14 @@ type Querier interface {
 	RevokeAllRefreshTokensForUser(ctx context.Context, userID pgtype.UUID) error
 	RevokeRefreshToken(ctx context.Context, id pgtype.UUID) error
 	RevokeRefreshTokenByHash(ctx context.Context, tokenHash string) error
+	// Local-dev-only: fabricates a completed result for an already-synced
+	// game (used by cmd/seed-demo, never by the running server). Sets
+	// kickoff_at into the past, status='final', a made-up score, and
+	// winner_team_id derived from home_wins — but deliberately leaves
+	// graded_at untouched (NULL) so the real grading.Service.GradeGame path
+	// (its normal idempotency guard) is what actually grades it, keeping the
+	// fabricated data exactly as internally consistent as a real result.
+	SeedFinalizeGame(ctx context.Context, arg SeedFinalizeGameParams) (Game, error)
 	UpdateCommissionerIsContestant(ctx context.Context, arg UpdateCommissionerIsContestantParams) (LeagueMembership, error)
 	UpdateLeagueInviteCode(ctx context.Context, arg UpdateLeagueInviteCodeParams) (League, error)
 	UpdateLeagueName(ctx context.Context, arg UpdateLeagueNameParams) (League, error)

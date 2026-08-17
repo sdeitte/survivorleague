@@ -53,6 +53,47 @@ func (q *Queries) GetTeamByID(ctx context.Context, id pgtype.UUID) (Team, error)
 	return i, err
 }
 
+const listEligibleConferences = `-- name: ListEligibleConferences :many
+SELECT conference
+FROM teams
+WHERE conference != 'FBS Independents'
+GROUP BY conference
+HAVING count(*) >= $1::int
+ORDER BY conference ASC
+`
+
+// Conferences a league can be created for: real FBS conferences with
+// enough member teams to sustain a ~13-week survivor season, excluding
+// FBS Independents (not a real conference — its members don't play each
+// other on a fixed schedule, so it can't anchor a conference-scoped
+// pool). The 13-team minimum and the Independents exclusion were both
+// explicit product decisions after post-realignment data showed Conference
+// USA/Mountain West/Pac-12 had shrunk to single digits. Computed live from
+// teams.conference (not a hardcoded list) so this stays correct through
+// future realignment without a code change — see
+// internal/schedule/conferences.go's FBSConferences for the separate,
+// still-hardcoded canonical name list this filters against (used for CFBD
+// normalization, not eligibility).
+func (q *Queries) ListEligibleConferences(ctx context.Context, minTeams int32) ([]string, error) {
+	rows, err := q.db.Query(ctx, listEligibleConferences, minTeams)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var conference string
+		if err := rows.Scan(&conference); err != nil {
+			return nil, err
+		}
+		items = append(items, conference)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTeams = `-- name: ListTeams :many
 SELECT id, external_id, name, conference, logo_url, created_at, updated_at FROM teams
 WHERE $1::text IS NULL OR conference = $1

@@ -94,6 +94,12 @@ export function CreateLeaguePage() {
               ))}
             </select>
             {errors.conference && <p className="text-red-400 text-xs mt-1">{errors.conference.message}</p>}
+            {!conferencesLoading && !conferencesError && conferences?.length === 0 && (
+              <p className="text-amber-500 text-xs mt-1">
+                No conferences available yet — a schedule sync needs to run first (site admins: see Admin →
+                Sync).
+              </p>
+            )}
             {conferencesError && (
               <p className="text-red-400 text-xs mt-1">
                 {conferencesError instanceof ApiError

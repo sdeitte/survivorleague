@@ -12,11 +12,22 @@ import (
 	"github.com/sdeitte/survivor-league-api/internal/db"
 	"github.com/sdeitte/survivor-league-api/internal/db/gen"
 	"github.com/sdeitte/survivor-league-api/internal/leagues"
-	"github.com/sdeitte/survivor-league-api/internal/schedule"
 )
 
 func (a *API) handleListConferences(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, schedule.FBSConferences)
+	conferences, err := a.scheduleService.ListEligibleConferences(r.Context())
+	if err != nil {
+		log.Printf("list eligible conferences: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to list conferences")
+		return
+	}
+	// nil vs [] both marshal to "null" vs "[]" in Go's encoding/json — force
+	// an empty slice (not nil) so a no-sync-yet response is a valid "[]",
+	// not "null", for clients that don't special-case null arrays.
+	if conferences == nil {
+		conferences = []string{}
+	}
+	writeJSON(w, http.StatusOK, conferences)
 }
 
 func (a *API) handleCreateLeague(w http.ResponseWriter, r *http.Request) {
@@ -40,8 +51,14 @@ func (a *API) handleCreateLeague(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "season_year must be a reasonable 4-digit year")
 		return
 	}
-	if !schedule.IsValidConference(req.Conference) {
-		writeError(w, http.StatusBadRequest, "conference is not a recognized FBS conference")
+	eligible, err := a.scheduleService.IsEligibleConference(r.Context(), req.Conference)
+	if err != nil {
+		log.Printf("check eligible conference: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to validate conference")
+		return
+	}
+	if !eligible {
+		writeError(w, http.StatusBadRequest, "conference is not eligible for a league (unrecognized, FBS Independents, or fewer than 13 synced teams)")
 		return
 	}
 

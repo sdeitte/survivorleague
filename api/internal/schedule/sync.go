@@ -37,8 +37,19 @@ type SyncResult struct {
 	SeasonYear int `json:"season_year"`
 
 	TeamsUpserted int `json:"teams_upserted"`
+	// WeeksUpserted is the final count of weeks actually kept — it already
+	// excludes anything counted in WeeksPruned below.
 	WeeksUpserted int `json:"weeks_upserted"`
 	GamesUpserted int `json:"games_upserted"`
+
+	// WeeksPruned counts weeks CFBD's calendar listed as seasonType=regular
+	// (so they were initially upserted) that turned out to have zero games
+	// attached once the games pull completed, and were deleted as a result
+	// — e.g. a scheduling-gap week CFBD reports between the end of
+	// regular-season play and conference championship week. See
+	// DeleteWeekIfNoGames's doc comment for why this is always safe (a
+	// week with any real games or pick history is never touched).
+	WeeksPruned int `json:"weeks_pruned"`
 
 	// GamesSkipped is len(SkippedGames) — a game whose home/away team or
 	// week couldn't be resolved (e.g. an FCS opponent never synced as a
@@ -204,6 +215,22 @@ func (s *Service) SyncSeason(ctx context.Context, year int) (SyncResult, error) 
 			return result, fmt.Errorf("schedule: upsert game %s: %w", externalID, err)
 		}
 		result.GamesUpserted++
+	}
+
+	// Prune any week upserted above that ended up with zero games attached
+	// — CFBD's calendar can list a seasonType=regular week (e.g. a
+	// scheduling-gap week before conference championship weekend) that
+	// never has any games in it. See DeleteWeekIfNoGames's doc comment for
+	// why this is always safe to attempt unconditionally.
+	for _, weekID := range weekIDByNumber {
+		rows, err := s.queries.DeleteWeekIfNoGames(ctx, weekID)
+		if err != nil {
+			return result, fmt.Errorf("schedule: prune empty week: %w", err)
+		}
+		if rows > 0 {
+			result.WeeksUpserted--
+			result.WeeksPruned++
+		}
 	}
 
 	return result, nil

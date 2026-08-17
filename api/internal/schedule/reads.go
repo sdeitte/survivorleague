@@ -72,6 +72,39 @@ func (s *Service) ListTeams(ctx context.Context, conference string) ([]gen.Team,
 	return s.queries.ListTeams(ctx, arg)
 }
 
+// MinConferenceTeamsForLeague is the minimum number of currently-synced
+// FBS teams a conference must have to be offered as a league's conference
+// at creation time. See ListEligibleConferences.
+const MinConferenceTeamsForLeague = 13
+
+// ListEligibleConferences returns the conferences a league can be created
+// for: real conferences (never "FBS Independents" — its members don't
+// share a fixed schedule) with at least MinConferenceTeamsForLeague
+// currently-synced teams. Computed live from teams.conference rather than
+// FBSConferences' static list, so it stays correct through future
+// conference realignment without a code change. Backs GET /conferences
+// and POST /leagues' conference validation. Returns an empty slice (not
+// an error) if no schedule sync has run yet — see this method's callers
+// for how that's surfaced.
+func (s *Service) ListEligibleConferences(ctx context.Context) ([]string, error) {
+	return s.queries.ListEligibleConferences(ctx, MinConferenceTeamsForLeague)
+}
+
+// IsEligibleConference reports whether name is currently in
+// ListEligibleConferences' result.
+func (s *Service) IsEligibleConference(ctx context.Context, name string) (bool, error) {
+	conferences, err := s.ListEligibleConferences(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, c := range conferences {
+		if c == name {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // ListLiveWindowWeeks returns the distinct (season_year, week_number)
 // pairs among games currently inside the live poll window: kicked off
 // on-or-before now, but not so long ago that they've fallen out the far

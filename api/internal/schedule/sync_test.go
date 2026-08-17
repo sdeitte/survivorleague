@@ -108,10 +108,16 @@ func TestService_SyncSeason_Success(t *testing.T) {
 	if result.TeamsUpserted != 4 {
 		t.Errorf("TeamsUpserted = %d, want 4", result.TeamsUpserted)
 	}
-	// Only the two "regular" calendar entries — the postseason entry in
-	// the fixture must be filtered out (see fixtureCalendarJSON's comment).
-	if result.WeeksUpserted != 2 {
-		t.Errorf("WeeksUpserted = %d, want 2", result.WeeksUpserted)
+	// The calendar declares two "regular" weeks (the postseason entry must
+	// be filtered out — see fixtureCalendarJSON's comment), but every
+	// fixture game is week 1 — week 2 has none, so it's pruned as an empty
+	// week (see DeleteWeekIfNoGames's doc comment). Net: 1 week kept, 1
+	// pruned.
+	if result.WeeksUpserted != 1 {
+		t.Errorf("WeeksUpserted = %d, want 1", result.WeeksUpserted)
+	}
+	if result.WeeksPruned != 1 {
+		t.Errorf("WeeksPruned = %d, want 1", result.WeeksPruned)
 	}
 	// Games 101 and 102 resolve; game 104 (home team id=999, never synced
 	// as a team) must be skipped, not crash the sync.
@@ -163,8 +169,8 @@ func TestService_SyncSeason_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListWeeksBySeasonYear: %v", err)
 	}
-	if len(weeks) != 2 {
-		t.Fatalf("ListWeeksBySeasonYear returned %d rows, want 2", len(weeks))
+	if len(weeks) != 1 {
+		t.Fatalf("ListWeeksBySeasonYear returned %d rows, want 1 (week 2 has no games and is pruned)", len(weeks))
 	}
 
 	game101, err := findGameByExternalID(context.Background(), q, weeks, "101")
@@ -250,8 +256,8 @@ func TestService_SyncSeason_IdempotentOnRepeatedRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListWeeksBySeasonYear: %v", err)
 	}
-	if len(weeks) != 2 {
-		t.Errorf("weeks for season_year=%d after two syncs: got %d rows, want exactly 2 (no duplicates)", year, len(weeks))
+	if len(weeks) != 1 {
+		t.Errorf("weeks for season_year=%d after two syncs: got %d rows, want exactly 1 (week 2 has no games and is pruned; no duplicates)", year, len(weeks))
 	}
 
 	totalGames := 0

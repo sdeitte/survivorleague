@@ -11,6 +11,29 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteWeekIfNoGames = `-- name: DeleteWeekIfNoGames :execrows
+DELETE FROM weeks w
+WHERE w.id = $1
+  AND NOT EXISTS (SELECT 1 FROM games g WHERE g.week_id = w.id)
+`
+
+// Best-effort cleanup for a week that CFBD's calendar lists as
+// seasonType=regular (so SyncSeason inserts it) but that turned out to
+// have zero actual games attached — e.g. a scheduling-gap week CFBD
+// reports between the end of regular-season play and conference
+// championship week. Deleting is safe: every FK into weeks (games,
+// picks, league_memberships.eliminated_week_id, league_week_results) is
+// ON DELETE RESTRICT, so this is a genuine no-op (0 rows affected, no
+// error) for any week that has real games or history attached, not just
+// for ones with zero games right now.
+func (q *Queries) DeleteWeekIfNoGames(ctx context.Context, id pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteWeekIfNoGames, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getWeekByID = `-- name: GetWeekByID :one
 SELECT id, season_year, week_number, created_at, updated_at FROM weeks WHERE id = $1
 `
