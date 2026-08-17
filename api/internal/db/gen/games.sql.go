@@ -181,6 +181,60 @@ func (q *Queries) ListGamesByWeekWithTeams(ctx context.Context, weekID pgtype.UU
 	return items, nil
 }
 
+const seedFinalizeGame = `-- name: SeedFinalizeGame :one
+UPDATE games SET
+    kickoff_at = $1,
+    status = 'final',
+    home_score = $2,
+    away_score = $3,
+    winner_team_id = (CASE WHEN $4::boolean THEN home_team_id ELSE away_team_id END),
+    updated_at = now()
+WHERE id = $5
+RETURNING id, external_id, week_id, home_team_id, away_team_id, kickoff_at, status, home_score, away_score, winner_team_id, graded_at, created_at, updated_at
+`
+
+type SeedFinalizeGameParams struct {
+	KickoffAt pgtype.Timestamptz `json:"kickoff_at"`
+	HomeScore pgtype.Int4        `json:"home_score"`
+	AwayScore pgtype.Int4        `json:"away_score"`
+	HomeWins  bool               `json:"home_wins"`
+	ID        pgtype.UUID        `json:"id"`
+}
+
+// Local-dev-only: fabricates a completed result for an already-synced
+// game (used by cmd/seed-demo, never by the running server). Sets
+// kickoff_at into the past, status='final', a made-up score, and
+// winner_team_id derived from home_wins — but deliberately leaves
+// graded_at untouched (NULL) so the real grading.Service.GradeGame path
+// (its normal idempotency guard) is what actually grades it, keeping the
+// fabricated data exactly as internally consistent as a real result.
+func (q *Queries) SeedFinalizeGame(ctx context.Context, arg SeedFinalizeGameParams) (Game, error) {
+	row := q.db.QueryRow(ctx, seedFinalizeGame,
+		arg.KickoffAt,
+		arg.HomeScore,
+		arg.AwayScore,
+		arg.HomeWins,
+		arg.ID,
+	)
+	var i Game
+	err := row.Scan(
+		&i.ID,
+		&i.ExternalID,
+		&i.WeekID,
+		&i.HomeTeamID,
+		&i.AwayTeamID,
+		&i.KickoffAt,
+		&i.Status,
+		&i.HomeScore,
+		&i.AwayScore,
+		&i.WinnerTeamID,
+		&i.GradedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const upsertGame = `-- name: UpsertGame :one
 INSERT INTO games (
     external_id, week_id, home_team_id, away_team_id, kickoff_at,

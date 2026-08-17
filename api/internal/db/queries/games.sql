@@ -51,6 +51,24 @@ JOIN teams ht ON ht.id = g.home_team_id
 JOIN teams at ON at.id = g.away_team_id
 WHERE g.id = sqlc.arg(id);
 
+-- name: SeedFinalizeGame :one
+-- Local-dev-only: fabricates a completed result for an already-synced
+-- game (used by cmd/seed-demo, never by the running server). Sets
+-- kickoff_at into the past, status='final', a made-up score, and
+-- winner_team_id derived from home_wins — but deliberately leaves
+-- graded_at untouched (NULL) so the real grading.Service.GradeGame path
+-- (its normal idempotency guard) is what actually grades it, keeping the
+-- fabricated data exactly as internally consistent as a real result.
+UPDATE games SET
+    kickoff_at = sqlc.arg(kickoff_at),
+    status = 'final',
+    home_score = sqlc.arg(home_score),
+    away_score = sqlc.arg(away_score),
+    winner_team_id = (CASE WHEN sqlc.arg(home_wins)::boolean THEN home_team_id ELSE away_team_id END),
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
 -- name: GetGame :one
 -- Plain (unjoined) single-game lookup — backs internal/schedule's
 -- RefreshGame (Phase 8's admin single-game resync), which only needs
