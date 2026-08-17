@@ -4,11 +4,13 @@ Go module for the Survivor League REST API. Phase 1: auth
 (register/login/refresh/logout), `GET`/`PATCH /me`, the
 `requireAuth`/`requireSiteAdmin` middleware, sqlc-generated DB access, and
 the Phase 0 Postgres-backed `/health` check. Phase 2 added league CRUD,
-membership, and the invite-code join flow. Phase 3 adds CFBD schedule
+membership, and the invite-code join flow. Phase 3 added CFBD schedule
 ingestion (`internal/schedule`), read-only `/weeks`, `/weeks/:id/games`,
 `/games/:id`, `/teams` endpoints, the first `/admin/*` endpoints
 (`internal/admin` — triggering/viewing a schedule sync, the first real use
-of `requireSiteAdmin`), and a daily cron sync.
+of `requireSiteAdmin`), and a daily cron sync. Phase 4 adds pick
+submission/retrieval (`internal/picks`) with server-enforced per-game
+locking and the no-repeat-team rule.
 
 See the full plan: `/Users/sdeitte/.claude/plans/witty-questing-barto.md`.
 
@@ -109,6 +111,39 @@ for exact request/response shapes. Highlights:
 picks UI shows, in a later phase). Populated by CFBD schedule sync, not
 hand-entered.
 
+## Picks endpoints (Phase 4)
+
+`GET`/`PUT /leagues/:id/weeks/:weekId/picks/me`,
+`GET /leagues/:id/weeks/:weekId/available-teams`,
+`GET /leagues/:id/weeks/:weekId/picks` — all `requireLeagueMember`; `PUT
+.../picks/me` additionally requires the requester's own membership to have
+`status='active'`. See `openapi/openapi.yaml` for exact request/response
+shapes. Highlights:
+
+- **Lock is per-game, checked live against `games.kickoff_at`, not a
+  week-level flag.** A pick is frozen the moment the game backing the
+  membership's *current* selection for that week has kicked off — even if
+  other games that week are already underway. `locked` in every pick
+  response is computed at request time, never stored.
+- **"Used" only applies to a team currently sitting in a pick row.** Picks
+  are upserted on `(league_membership_id, week_id)` (create-or-update, not
+  create-a-new-row) — changing your mind before your current pick locks
+  frees the abandoned team for a different week immediately.
+  `UNIQUE(league_membership_id, team_id)` then does the rest: a team stays
+  unavailable for a different week only while some row currently holds it.
+- `PUT .../picks/me` validates, in order: game belongs to the week (400);
+  team is one of that game's two teams (400); team belongs to the league's
+  locked conference (400); the target game (and, if a pick already exists
+  for the week, that existing pick's current game) must not have already
+  kicked off (409); a team already committed to a different week is caught
+  as a clean 409, not a raw DB constraint error.
+- `GET .../picks` (all members' status for a week) hides `game_id`/`team_id`
+  together (never just one) for any other member's pick whose game hasn't
+  kicked off yet — the requester's own entry is always fully visible.
+- `internal/picks` implements all of this; `internal/db/queries/picks.sql`
+  holds the underlying SQL (no schema migration was needed — Phase 0's
+  `picks` table already had everything required).
+
 ## Admin endpoints (Phase 3)
 
 `POST /admin/sync/schedule` (body: `{"season_year": 2025}`, required, no
@@ -157,8 +192,9 @@ internal/
                /teams (Phase 3)
   admin/       site-admin schedule-sync trigger + sync_runs/audit_log
                bookkeeping (Phase 3); cross-league oversight lands Phase 8
-  picks, grading, notify — empty stubs, filled in phase-by-phase per the
-               roadmap
+  picks/       pick submission/retrieval, per-game locking, no-repeat-team
+               rule (Phase 4)
+  grading, notify — empty stubs, filled in phase-by-phase per the roadmap
 migrations/    goose SQL migrations
 openapi/       openapi.yaml, the source-of-truth API spec
 sqlc.yaml      sqlc codegen config

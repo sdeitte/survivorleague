@@ -277,6 +277,69 @@ func toGameResponseFromGetRow(g gen.GetGameByIDWithTeamsRow) gameResponse {
 	}
 }
 
+// --- Picks (Phase 4) ---
+
+// upsertPickRequest is the body of PUT .../picks/me.
+type upsertPickRequest struct {
+	GameID string `json:"game_id"`
+	TeamID string `json:"team_id"`
+}
+
+// pickResponse is a single pick, with `locked` computed live against the
+// backing game's kickoff_at rather than stored — see internal/picks'
+// package doc comment. Backs GET .../picks/me and the response of
+// PUT .../picks/me.
+type pickResponse struct {
+	GameID string `json:"game_id"`
+	TeamID string `json:"team_id"`
+	Locked bool   `json:"locked"`
+}
+
+func toPickResponse(p gen.Pick, locked bool) pickResponse {
+	return pickResponse{
+		GameID: db.UUIDString(p.GameID),
+		TeamID: db.UUIDString(p.TeamID),
+		Locked: locked,
+	}
+}
+
+// availableTeamResponse is one row of GET .../available-teams.
+type availableTeamResponse struct {
+	TeamID          string `json:"team_id"`
+	TeamName        string `json:"team_name"`
+	TeamLogoURL     string `json:"team_logo_url,omitempty"`
+	OpponentTeamID  string `json:"opponent_team_id"`
+	OpponentName    string `json:"opponent_name"`
+	OpponentLogoURL string `json:"opponent_logo_url,omitempty"`
+	GameID          string `json:"game_id"`
+	KickoffAt       string `json:"kickoff_at"`
+	IsLocked        bool   `json:"is_locked"`
+	IsUsedElsewhere bool   `json:"is_used_elsewhere"`
+	IsCurrentPick   bool   `json:"is_current_pick"`
+}
+
+// availableTeamsResponse is the full response of GET .../available-teams:
+// every pickable team for the week, plus the requester's current pick for
+// that week (if any) surfaced at the top level too, so the UI can render
+// the current selection without a second round-trip.
+type availableTeamsResponse struct {
+	Teams       []availableTeamResponse `json:"teams"`
+	CurrentPick *pickResponse           `json:"current_pick,omitempty"`
+}
+
+// memberPickStatusResponse is one row of GET .../picks. game_id/team_id
+// are omitted (via `omitempty` on a string that's left "" by the handler)
+// for any OTHER member's pick whose game hasn't kicked off yet — the
+// privacy rule from the API contract. The requester's own row always
+// carries them when has_picked is true.
+type memberPickStatusResponse struct {
+	MembershipID string `json:"membership_id"`
+	DisplayName  string `json:"display_name"`
+	HasPicked    bool   `json:"has_picked"`
+	GameID       string `json:"game_id,omitempty"`
+	TeamID       string `json:"team_id,omitempty"`
+}
+
 // --- Admin (Phase 3) ---
 
 type triggerScheduleSyncRequest struct {

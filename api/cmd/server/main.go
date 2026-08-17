@@ -31,6 +31,7 @@ import (
 	"github.com/sdeitte/survivor-league-api/internal/db/gen"
 	"github.com/sdeitte/survivor-league-api/internal/httpapi"
 	"github.com/sdeitte/survivor-league-api/internal/leagues"
+	"github.com/sdeitte/survivor-league-api/internal/picks"
 	"github.com/sdeitte/survivor-league-api/internal/schedule"
 )
 
@@ -100,6 +101,7 @@ func main() {
 	cfbdClient := schedule.NewCFBDClient(http.DefaultClient, cfbdBaseURL, cfbdAPIKey)
 	scheduleService := schedule.NewService(queries, cfbdClient)
 	adminService := admin.NewService(queries, scheduleService)
+	picksService := picks.NewService(queries, pool)
 
 	router := httpapi.NewRouter(httpapi.Deps{
 		Pool:              pool,
@@ -107,6 +109,7 @@ func main() {
 		LeaguesService:    leaguesService,
 		ScheduleService:   scheduleService,
 		AdminService:      adminService,
+		PicksService:      picksService,
 		JWT:               jwtIssuer,
 		AppEnv:            appEnv,
 		CORSAllowedOrigin: corsAllowedOrigin,

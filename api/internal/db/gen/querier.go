@@ -38,22 +38,48 @@ type Querier interface {
 	// Excludes removed members by design: this backs requireLeagueMember, where
 	// a removed_at row must behave exactly like "never joined" (403).
 	GetMembershipByLeagueAndUser(ctx context.Context, arg GetMembershipByLeagueAndUserParams) (LeagueMembership, error)
+	// Backs GET .../picks/me. A no-rows result (pgx.ErrNoRows) means the
+	// membership has not picked for this week yet — mapped by the service to
+	// ErrPickNotFound.
+	GetPickByMembershipAndWeek(ctx context.Context, arg GetPickByMembershipAndWeekParams) (Pick, error)
+	// Same as GetPickByMembershipAndWeek but row-locked, used inside the
+	// upsert transaction so a concurrent upsert for the same
+	// (league_membership_id, week_id) can't race past the lock check between
+	// "read the current pick's game" and "write the new one".
+	GetPickByMembershipAndWeekForUpdate(ctx context.Context, arg GetPickByMembershipAndWeekForUpdateParams) (Pick, error)
 	GetTeamByID(ctx context.Context, id pgtype.UUID) (Team, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 	GetWeekByID(ctx context.Context, id pgtype.UUID) (Week, error)
 	LeagueInviteCodeExists(ctx context.Context, inviteCode string) (bool, error)
 	ListActiveMembersWithUser(ctx context.Context, leagueID pgtype.UUID) ([]ListActiveMembersWithUserRow, error)
+	// Every team in the league's conference that has a game in the given week,
+	// with its opponent, game id, and kickoff time inline so the picks screen
+	// doesn't need N+1 lookups. is_locked/is_used_elsewhere are computed by
+	// the service layer (the former against time.Now(), the latter against
+	// ListUsedTeamIDsForMembershipExcludingWeek's result), not this query.
+	ListAvailableTeamsForWeek(ctx context.Context, arg ListAvailableTeamsForWeekParams) ([]ListAvailableTeamsForWeekRow, error)
 	// Joined with both teams' name/conference/logo so clients don't need N+1
 	// lookups per the GET /weeks/:id/games contract.
 	ListGamesByWeekWithTeams(ctx context.Context, weekID pgtype.UUID) ([]ListGamesByWeekWithTeamsRow, error)
 	// Leagues the given user has a non-removed membership in, along with their
 	// role/is_contestant/status in each (GET /leagues needs both in one shot).
 	ListLeaguesForUser(ctx context.Context, userID pgtype.UUID) ([]ListLeaguesForUserRow, error)
+	// Every non-removed member of the league with their pick status for the
+	// given week (LEFT JOINed — members with no pick yet still appear, with
+	// null pick/game/team/kickoff columns). Backs GET .../picks; the service
+	// layer applies the pre-lock privacy rule (hiding game_id/team_id for
+	// other members' not-yet-started picks), not this query.
+	ListPicksByWeekForLeague(ctx context.Context, arg ListPicksByWeekForLeagueParams) ([]ListPicksByWeekForLeagueRow, error)
 	ListSyncRuns(ctx context.Context, rowLimit int32) ([]SyncRun, error)
 	// conference is an optional exact-match filter: pass a NULL narg to list
 	// every team, or a canonical conference name to filter to it.
 	ListTeams(ctx context.Context, conference pgtype.Text) ([]Team, error)
+	// Every team_id currently sitting in one of this membership's picks for a
+	// week OTHER than the given one — regardless of whether that other pick's
+	// game has locked yet, per the "used" rule (a team is only free again once
+	// no row anywhere holds it). Backs available-teams' is_used_elsewhere.
+	ListUsedTeamIDsForMembershipExcludingWeek(ctx context.Context, arg ListUsedTeamIDsForMembershipExcludingWeekParams) ([]pgtype.UUID, error)
 	ListWeeksBySeasonYear(ctx context.Context, seasonYear int32) ([]Week, error)
 	// Soft-delete: only affects a currently-active (non-removed) row scoped to
 	// the given league, so this doubles as the "membership belongs to this
@@ -85,6 +111,19 @@ type Querier interface {
 	//     treat "no rows" as "already a member" (409) — this also protects a
 	//     commissioner's own membership from ever being reset by this query.
 	UpsertLeagueMembershipOnJoin(ctx context.Context, arg UpsertLeagueMembershipOnJoinParams) (LeagueMembership, error)
+	// Create-or-update a membership's pick for a week. ON CONFLICT targets the
+	// UNIQUE(league_membership_id, week_id) constraint — this is what makes
+	// "changing your mind" an UPDATE of the same row (not a second row), which
+	// is exactly what frees a since-abandoned team for a different week (see
+	// the plan's "used" rule). The service layer must have already verified
+	// the existing pick (if any) isn't locked before calling this.
+	//
+	// This can still fail on the OTHER unique constraint,
+	// UNIQUE(league_membership_id, team_id), if team_id is already committed
+	// to a different week's row — the service layer catches that
+	// (23505 on the team_id constraint) and maps it to ErrTeamAlreadyUsed
+	// rather than surfacing a raw DB error.
+	UpsertPick(ctx context.Context, arg UpsertPickParams) (Pick, error)
 	// Match/upsert on external_id (CFBD's team id) per the Phase 3 sync
 	// contract. conference is always the *normalized* name (mapped from
 	// CFBD's raw string by internal/schedule's normalization table before this

@@ -8,12 +8,15 @@ info:
 
     Phase 1 added auth (register/login/refresh/logout) and the current-user
     endpoints. Phase 2 added league CRUD, membership, the invite-code join
-    flow, and the conferences list. Phase 3 adds read-only schedule
+    flow, and the conferences list. Phase 3 added read-only schedule
     endpoints (weeks/games/teams, populated by a CFBD sync) and the first
-    site-admin endpoints (triggering/viewing that sync). Picks, leaderboard,
-    and the rest of site-admin are added incrementally in later phases per
-    the roadmap — see /Users/sdeitte/.claude/plans/witty-questing-barto.md.
-  version: 0.3.0
+    site-admin endpoints (triggering/viewing that sync). Phase 4 adds pick
+    submission/retrieval with server-enforced per-game locking and the
+    no-repeat-team rule, plus pre-lock pick-hiding for other league members.
+    Leaderboard and the rest of site-admin are added incrementally in later
+    phases per the roadmap — see
+    /Users/sdeitte/.claude/plans/witty-questing-barto.md.
+  version: 0.4.0
 servers:
   - url: http://localhost:8080
     description: Local development
@@ -571,6 +574,206 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: League not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /leagues/{id}/weeks/{weekId}/picks/me:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: weekId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getMyPick
+      summary: Get the requester's own pick for a week
+      description: >
+        Requires a non-removed membership in the league (requireLeagueMember).
+        `locked` is computed live against the backing game's kickoff_at, not
+        stored. 404 if the requester has no pick for this week yet.
+      tags:
+        - Picks
+      responses:
+        "200":
+          description: The requester's pick for this week
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pick"
+        "403":
+          description: Not a member of this league
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: League or week not found, or no pick submitted for this week yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: upsertMyPick
+      summary: Create or update the requester's pick for a week
+      description: >
+        Requires a non-removed, status=active membership in the league
+        (requireLeagueMember, plus an explicit active-status check — a
+        membership with status != active, e.g. a future eliminated member,
+        cannot submit picks). Validated in order: game_id belongs to
+        week_id (400); team_id is one of that game's two teams (400);
+        team_id belongs to the league's locked conference (400); the
+        target game itself must not have already kicked off, and if a pick
+        already exists for this week its CURRENT game must not have
+        already kicked off either (409, "already locked"). On success,
+        upserts (creates or updates) the week's single pick row on
+        (league_membership_id, week_id) — changing your mind before lock
+        updates the same row rather than inserting a second one, which is
+        what frees an abandoned team for a different week. A team already
+        committed to a *different* week's pick row is rejected with a
+        clean 409 rather than a raw database constraint error.
+      tags:
+        - Picks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertPickRequest"
+      responses:
+        "200":
+          description: The resulting pick
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pick"
+        "400":
+          description: Invalid body, game does not belong to the week, team is not one of the game's two teams, or team is not in the league's conference
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not a member of this league, or membership is not active
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: League or week not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: >
+            The pick (or the target game) is already locked, or the team is
+            already committed to a different week's pick.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /leagues/{id}/weeks/{weekId}/available-teams:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: weekId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: listAvailableTeams
+      summary: List pickable teams for a week
+      description: >
+        Requires a non-removed membership in the league (requireLeagueMember).
+        Every team in the league's locked conference that has a game in the
+        given week, each annotated with is_locked (that specific game has
+        kicked off) and is_used_elsewhere (this team is already the
+        requester's pick for a DIFFERENT week, regardless of that other
+        pick's lock status). Also surfaces the requester's current pick for
+        THIS week (if any) so the UI can render the current selection
+        without a second round-trip.
+      tags:
+        - Picks
+      responses:
+        "200":
+          description: This week's pickable teams, plus the requester's current pick for it
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AvailableTeamsResponse"
+        "403":
+          description: Not a member of this league
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: League or week not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /leagues/{id}/weeks/{weekId}/picks:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: weekId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: listWeekPicks
+      summary: List every league member's pick status for a week
+      description: >
+        Requires a non-removed membership in the league (requireLeagueMember).
+        Privacy rule: for every membership that is NOT the requester's own,
+        game_id/team_id are included only once that pick's game has kicked
+        off — omitted as a pair (never just team_id) while it hasn't, since
+        revealing even which game a member is tied to narrows their choice
+        to two teams. The requester's own entry always includes full detail
+        when has_picked is true, regardless of lock status.
+      tags:
+        - Picks
+      responses:
+        "200":
+          description: Every non-removed member's pick status for this week
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MemberPickStatus"
+        "403":
+          description: Not a member of this league
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: League or week not found
           content:
             application/json:
               schema:
@@ -1221,6 +1424,118 @@ components:
         away_score:
           type: integer
         winner_team_id:
+          type: string
+          format: uuid
+
+    Pick:
+      type: object
+      description: A single week's pick. `locked` is computed live against the backing game's kickoff_at, not stored.
+      required:
+        - game_id
+        - team_id
+        - locked
+      properties:
+        game_id:
+          type: string
+          format: uuid
+        team_id:
+          type: string
+          format: uuid
+        locked:
+          type: boolean
+
+    UpsertPickRequest:
+      type: object
+      required:
+        - game_id
+        - team_id
+      properties:
+        game_id:
+          type: string
+          format: uuid
+        team_id:
+          type: string
+          format: uuid
+
+    AvailableTeam:
+      type: object
+      description: One pickable team for a week, with its opponent/game inline so the picks screen doesn't need N+1 lookups.
+      required:
+        - team_id
+        - team_name
+        - opponent_team_id
+        - opponent_name
+        - game_id
+        - kickoff_at
+        - is_locked
+        - is_used_elsewhere
+        - is_current_pick
+      properties:
+        team_id:
+          type: string
+          format: uuid
+        team_name:
+          type: string
+        team_logo_url:
+          type: string
+        opponent_team_id:
+          type: string
+          format: uuid
+        opponent_name:
+          type: string
+        opponent_logo_url:
+          type: string
+        game_id:
+          type: string
+          format: uuid
+        kickoff_at:
+          type: string
+          format: date-time
+        is_locked:
+          type: boolean
+          description: This team's game has already kicked off.
+        is_used_elsewhere:
+          type: boolean
+          description: This team is already the requester's pick for a DIFFERENT week (regardless of that pick's lock status).
+        is_current_pick:
+          type: boolean
+          description: This team is the requester's current pick for THIS week.
+
+    AvailableTeamsResponse:
+      type: object
+      required:
+        - teams
+      properties:
+        teams:
+          type: array
+          items:
+            $ref: "#/components/schemas/AvailableTeam"
+        current_pick:
+          $ref: "#/components/schemas/Pick"
+          description: The requester's current pick for this week, if any (absent if they haven't picked yet).
+
+    MemberPickStatus:
+      type: object
+      description: >
+        A league member's pick status for a week. game_id/team_id are only
+        present when the caller is entitled to see them — see
+        GET /leagues/{id}/weeks/{weekId}/picks's privacy-rule description.
+      required:
+        - membership_id
+        - display_name
+        - has_picked
+      properties:
+        membership_id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+        has_picked:
+          type: boolean
+        game_id:
+          type: string
+          format: uuid
+        team_id:
           type: string
           format: uuid
 

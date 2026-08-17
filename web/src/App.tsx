@@ -8,6 +8,7 @@ import { HealthCheckPage } from './routes/HealthCheckPage'
 import { CreateLeaguePage } from './routes/CreateLeaguePage'
 import { JoinLeaguePage } from './routes/JoinLeaguePage'
 import { LeagueDetailPage } from './routes/LeagueDetailPage'
+import { PicksPage } from './routes/PicksPage'
 
 function App() {
   return (
@@ -45,6 +46,14 @@ function App() {
           element={
             <ProtectedRoute>
               <LeagueDetailPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/leagues/:id/picks"
+          element={
+            <ProtectedRoute>
+              <PicksPage />
             </ProtectedRoute>
           }
         />

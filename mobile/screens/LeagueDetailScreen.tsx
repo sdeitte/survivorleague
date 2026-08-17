@@ -5,7 +5,15 @@ import { useAuth } from '../auth/AuthContext';
 import * as api from '../api';
 import { ApiError, type Member } from '../api';
 
-export function LeagueDetailScreen({ leagueId, onBack }: { leagueId: string; onBack: () => void }) {
+export function LeagueDetailScreen({
+  leagueId,
+  onBack,
+  onNavigateToPicks,
+}: {
+  leagueId: string;
+  onBack: () => void;
+  onNavigateToPicks: (leagueId: string) => void;
+}) {
   const { authFetch } = useAuth();
   const queryClient = useQueryClient();
   const [actionError, setActionError] = useState<string | null>(null);
@@ -107,6 +115,10 @@ export function LeagueDetailScreen({ leagueId, onBack }: { leagueId: string; onB
         keyExtractor={(item) => item.membership_id}
         ListHeaderComponent={
           <>
+            <Pressable style={styles.pickButton} onPress={() => onNavigateToPicks(leagueId)}>
+              <Text style={styles.pickButtonText}>Make your pick</Text>
+            </Pressable>
+
             <View style={styles.card}>
               <View style={styles.rowBetween}>
                 <Text style={styles.leagueName}>{league.name}</Text>
@@ -203,6 +215,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textDecorationLine: 'underline',
     marginBottom: 8,
+  },
+  pickButton: {
+    backgroundColor: '#059669',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  pickButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   card: {
     backgroundColor: '#1e293b',

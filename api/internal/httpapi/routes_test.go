@@ -233,6 +233,41 @@ func TestRouteTable_AdminRoutesRequireSiteAdmin(t *testing.T) {
 	}
 }
 
+// TestRouteTable_PicksRoutesRequireLeagueMember is the Phase 4 extension of
+// the plan's "Auth & RBAC" regression-guard pattern: every
+// /leagues/{id}/weeks/{weekId}/... picks route must carry at least
+// RequireLeagueMember, matching the rest of the /leagues/{id}/... subtree
+// (already covered structurally by
+// TestRouteTable_LeagueRoutesRequireAtLeastMembership's prefix match, but
+// asserted explicitly here too since these are the newest, easiest routes
+// to accidentally under-guard).
+func TestRouteTable_PicksRoutesRequireLeagueMember(t *testing.T) {
+	entries := walkRoutes(t, buildTestRouter(t))
+
+	want := map[string]bool{
+		"GET /leagues/{id}/weeks/{weekId}/picks/me":        false,
+		"PUT /leagues/{id}/weeks/{weekId}/picks/me":        false,
+		"GET /leagues/{id}/weeks/{weekId}/available-teams": false,
+		"GET /leagues/{id}/weeks/{weekId}/picks":           false,
+	}
+
+	for _, e := range entries {
+		key := e.method + " " + e.route
+		if _, tracked := want[key]; !tracked {
+			continue
+		}
+		want[key] = true
+		if !hasMiddleware(e.middlewares, "RequireLeagueMember") {
+			t.Errorf("%s does not carry RequireLeagueMember; middlewares=%v", key, e.middlewares)
+		}
+	}
+	for key, seen := range want {
+		if !seen {
+			t.Errorf("expected picks route %q not found in route table", key)
+		}
+	}
+}
+
 // TestRouteTable_ScheduleRoutesRequireAuth checks the Phase 3 read-only
 // schedule endpoints (shared across leagues, not league-scoped) all require
 // at least requireAuth — they're deliberately not requireLeagueMember since

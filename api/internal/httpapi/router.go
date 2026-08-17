@@ -12,6 +12,7 @@ import (
 	"github.com/sdeitte/survivor-league-api/internal/admin"
 	"github.com/sdeitte/survivor-league-api/internal/auth"
 	"github.com/sdeitte/survivor-league-api/internal/leagues"
+	"github.com/sdeitte/survivor-league-api/internal/picks"
 	"github.com/sdeitte/survivor-league-api/internal/schedule"
 )
 
@@ -22,6 +23,7 @@ type Deps struct {
 	LeaguesService    *leagues.Service
 	ScheduleService   *schedule.Service
 	AdminService      *admin.Service
+	PicksService      *picks.Service
 	JWT               *auth.JWTIssuer
 	AppEnv            string // "development" | "production" — gates cookie Secure flag
 	CORSAllowedOrigin string
@@ -34,13 +36,14 @@ type API struct {
 	leaguesService  *leagues.Service
 	scheduleService *schedule.Service
 	adminService    *admin.Service
+	picksService    *picks.Service
 	jwt             *auth.JWTIssuer
 	appEnv          string
 }
 
 // NewRouter builds the full chi router: middleware stack, CORS, and all
 // routes for this phase (health, auth, me, leagues/invites/conferences,
-// schedule reads, admin schedule sync).
+// schedule reads, admin schedule sync, picks).
 func NewRouter(d Deps) http.Handler {
 	a := &API{
 		pool:            d.Pool,
@@ -48,6 +51,7 @@ func NewRouter(d Deps) http.Handler {
 		leaguesService:  d.LeaguesService,
 		scheduleService: d.ScheduleService,
 		adminService:    d.AdminService,
+		picksService:    d.PicksService,
 		jwt:             d.JWT,
 		appEnv:          d.AppEnv,
 	}
@@ -94,6 +98,13 @@ func NewRouter(d Deps) http.Handler {
 		r.With(a.RequireCommissioner).Delete("/members/{membershipId}", a.handleRemoveMember)
 		r.With(a.RequireCommissioner).Get("/invite", a.handleGetInviteCode)
 		r.With(a.RequireCommissioner).Post("/invite/regenerate", a.handleRegenerateInviteCode)
+
+		r.Route("/weeks/{weekId}", func(r chi.Router) {
+			r.With(a.RequireLeagueMember).Get("/picks/me", a.handleGetMyPick)
+			r.With(a.RequireLeagueMember).Put("/picks/me", a.handleUpsertMyPick)
+			r.With(a.RequireLeagueMember).Get("/available-teams", a.handleListAvailableTeams)
+			r.With(a.RequireLeagueMember).Get("/picks", a.handleListWeekPicks)
+		})
 	})
 
 	r.Get("/invites/{code}", a.handlePreviewInvite)

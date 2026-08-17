@@ -117,6 +117,13 @@ export function LeagueDetailPage() {
           ← My Leagues
         </Link>
 
+        <Link
+          to={`/leagues/${id}/picks`}
+          className="block text-center rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500 transition-colors"
+        >
+          Make your pick
+        </Link>
+
         <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-1">
           <div className="flex items-center justify-between">
             <h1 className="text-xl font-semibold">{league.name}</h1>

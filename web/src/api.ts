@@ -68,6 +68,65 @@ export interface InvitePreviewResponse {
   season_year: number
 }
 
+export interface Week {
+  id: string
+  season_year: number
+  week_number: number
+}
+
+export interface GameTeam {
+  id: string
+  name: string
+  conference: string
+  logo_url?: string
+}
+
+export interface Game {
+  id: string
+  external_id: string
+  week_id: string
+  kickoff_at: string
+  status: 'scheduled' | 'in_progress' | 'final' | 'postponed' | 'canceled'
+  home_team: GameTeam
+  away_team: GameTeam
+  home_score?: number
+  away_score?: number
+  winner_team_id?: string
+}
+
+export interface Pick {
+  game_id: string
+  team_id: string
+  locked: boolean
+}
+
+export interface AvailableTeam {
+  team_id: string
+  team_name: string
+  team_logo_url?: string
+  opponent_team_id: string
+  opponent_name: string
+  opponent_logo_url?: string
+  game_id: string
+  kickoff_at: string
+  is_locked: boolean
+  is_used_elsewhere: boolean
+  is_current_pick: boolean
+}
+
+export interface AvailableTeamsResponse {
+  teams: AvailableTeam[]
+  current_pick?: Pick
+}
+
+export interface MemberPickStatus {
+  membership_id: string
+  display_name: string
+  has_picked: boolean
+  game_id?: string
+  team_id?: string
+}
+
 export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -248,4 +307,37 @@ export async function previewInvite(code: string): Promise<InvitePreviewResponse
 
 export async function joinLeagueByCode(code: string): Promise<League> {
   return apiFetch<League>(`/invites/${encodeURIComponent(code)}/join`, { method: 'POST' })
+}
+
+// --- Schedule / Picks (Phase 4) ---
+
+export async function listWeeks(seasonYear: number): Promise<Week[]> {
+  return apiFetch<Week[]>(`/weeks?season_year=${seasonYear}`)
+}
+
+// Returns null (rather than throwing) on a 404 — "no pick for this week
+// yet" is an expected, common state, not an error condition for callers.
+export async function getMyPick(leagueId: string, weekId: string): Promise<Pick | null> {
+  try {
+    return await apiFetch<Pick>(`/leagues/${leagueId}/weeks/${weekId}/picks/me`)
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null
+    throw err
+  }
+}
+
+export async function upsertMyPick(
+  leagueId: string,
+  weekId: string,
+  input: { game_id: string; team_id: string },
+): Promise<Pick> {
+  return apiFetch<Pick>(`/leagues/${leagueId}/weeks/${weekId}/picks/me`, { method: 'PUT', body: input })
+}
+
+export async function getAvailableTeams(leagueId: string, weekId: string): Promise<AvailableTeamsResponse> {
+  return apiFetch<AvailableTeamsResponse>(`/leagues/${leagueId}/weeks/${weekId}/available-teams`)
+}
+
+export async function listWeekPicks(leagueId: string, weekId: string): Promise<MemberPickStatus[]> {
+  return apiFetch<MemberPickStatus[]>(`/leagues/${leagueId}/weeks/${weekId}/picks`)
 }
