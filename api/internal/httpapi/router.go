@@ -113,6 +113,7 @@ func NewRouter(d Deps) http.Handler {
 		r.With(a.RequireLeagueMember).Get("/", a.handleGetLeague)
 		r.With(a.RequireCommissioner).Patch("/", a.handleUpdateLeague)
 		r.With(a.RequireLeagueMember).Get("/members", a.handleListMembers)
+		r.With(a.RequireLeagueMember).Get("/members/{membershipId}/picks", a.handleListMembershipPicks)
 		r.With(a.RequireLeagueMember).Get("/leaderboard", a.handleGetLeaderboard)
 		r.With(a.RequireCommissioner).Delete("/members/{membershipId}", a.handleRemoveMember)
 		r.With(a.RequireCommissioner).Post("/members/{membershipId}/buyback", a.handleBuyBackMember)

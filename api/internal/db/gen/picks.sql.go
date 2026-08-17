@@ -80,7 +80,8 @@ SELECT
     ot.name AS opponent_name,
     ot.logo_url AS opponent_logo_url,
     g.id AS game_id,
-    g.kickoff_at AS kickoff_at
+    g.kickoff_at AS kickoff_at,
+    (g.home_team_id = t.id) AS is_home
 FROM teams t
 JOIN games g ON g.week_id = $1 AND (g.home_team_id = t.id OR g.away_team_id = t.id)
 JOIN teams ot ON ot.id = (CASE WHEN g.home_team_id = t.id THEN g.away_team_id ELSE g.home_team_id END)
@@ -102,6 +103,7 @@ type ListAvailableTeamsForWeekRow struct {
 	OpponentLogoUrl pgtype.Text        `json:"opponent_logo_url"`
 	GameID          pgtype.UUID        `json:"game_id"`
 	KickoffAt       pgtype.Timestamptz `json:"kickoff_at"`
+	IsHome          bool               `json:"is_home"`
 }
 
 // Every team in the league's conference that has a game in the given week,
@@ -127,6 +129,101 @@ func (q *Queries) ListAvailableTeamsForWeek(ctx context.Context, arg ListAvailab
 			&i.OpponentLogoUrl,
 			&i.GameID,
 			&i.KickoffAt,
+			&i.IsHome,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPicksByMembershipForSeason = `-- name: ListPicksByMembershipForSeason :many
+SELECT
+    w.id AS week_id,
+    w.week_number AS week_number,
+    p.id AS pick_id,
+    p.game_id AS game_id,
+    p.team_id AS team_id,
+    p.result AS result,
+    g.kickoff_at AS kickoff_at,
+    t.name AS team_name,
+    t.logo_url AS team_logo_url,
+    ot.name AS opponent_name,
+    ot.logo_url AS opponent_logo_url,
+    -- Selected as the raw nullable column (not a computed
+    -- home_team_id = team_id boolean expression) because sqlc's
+    -- nullability inference doesn't reliably mark a CASE-derived boolean
+    -- as nullable through this join chain, and generating a non-nullable
+    -- Go bool for a column that's genuinely NULL on a no-pick week would
+    -- panic on scan. is_home is computed in Go instead (see
+    -- ListMembershipPicksForSeason) by comparing this against team_id,
+    -- both of which sqlc correctly infers as nullable since they're real
+    -- columns, not derived expressions.
+    g.home_team_id AS home_team_id
+FROM weeks w
+LEFT JOIN picks p ON p.week_id = w.id AND p.league_membership_id = $1
+LEFT JOIN games g ON g.id = p.game_id
+LEFT JOIN teams t ON t.id = p.team_id
+LEFT JOIN teams ot ON ot.id = (CASE WHEN g.home_team_id = p.team_id THEN g.away_team_id ELSE g.home_team_id END)
+WHERE w.season_year = $2
+ORDER BY w.week_number ASC
+`
+
+type ListPicksByMembershipForSeasonParams struct {
+	LeagueMembershipID pgtype.UUID `json:"league_membership_id"`
+	SeasonYear         int32       `json:"season_year"`
+}
+
+type ListPicksByMembershipForSeasonRow struct {
+	WeekID          pgtype.UUID        `json:"week_id"`
+	WeekNumber      int32              `json:"week_number"`
+	PickID          pgtype.UUID        `json:"pick_id"`
+	GameID          pgtype.UUID        `json:"game_id"`
+	TeamID          pgtype.UUID        `json:"team_id"`
+	Result          pgtype.Text        `json:"result"`
+	KickoffAt       pgtype.Timestamptz `json:"kickoff_at"`
+	TeamName        pgtype.Text        `json:"team_name"`
+	TeamLogoUrl     pgtype.Text        `json:"team_logo_url"`
+	OpponentName    pgtype.Text        `json:"opponent_name"`
+	OpponentLogoUrl pgtype.Text        `json:"opponent_logo_url"`
+	HomeTeamID      pgtype.UUID        `json:"home_team_id"`
+}
+
+// Every week of the season for one membership (LEFT JOINed against that
+// membership's pick, if any — a week with no pick still appears, with
+// null pick/game/team/result/kickoff columns), with team/opponent names
+// and home/away inline so the leaderboard's expandable per-contestant
+// history doesn't need N+1 lookups. Backs GET
+// .../members/{membershipId}/picks; the service/handler layer applies the
+// same pre-lock privacy rule ListPicksByWeekForLeague's callers do (hiding
+// every pick-identifying field, not just team_id, for another member's
+// not-yet-started pick) — this query itself doesn't know who's asking.
+func (q *Queries) ListPicksByMembershipForSeason(ctx context.Context, arg ListPicksByMembershipForSeasonParams) ([]ListPicksByMembershipForSeasonRow, error) {
+	rows, err := q.db.Query(ctx, listPicksByMembershipForSeason, arg.LeagueMembershipID, arg.SeasonYear)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPicksByMembershipForSeasonRow{}
+	for rows.Next() {
+		var i ListPicksByMembershipForSeasonRow
+		if err := rows.Scan(
+			&i.WeekID,
+			&i.WeekNumber,
+			&i.PickID,
+			&i.GameID,
+			&i.TeamID,
+			&i.Result,
+			&i.KickoffAt,
+			&i.TeamName,
+			&i.TeamLogoUrl,
+			&i.OpponentName,
+			&i.OpponentLogoUrl,
+			&i.HomeTeamID,
 		); err != nil {
 			return nil, err
 		}

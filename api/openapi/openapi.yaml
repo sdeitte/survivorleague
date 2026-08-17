@@ -909,6 +909,64 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /leagues/{id}/members/{membershipId}/picks:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: membershipId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: listMembershipPicks
+      summary: One member's full-season pick history (the leaderboard's expandable card)
+      description: >
+        Requires league membership (requireLeagueMember). Returns every
+        week of the league's season for membershipId, in week order,
+        whether or not they picked each week — has_picked is false and
+        every other field is absent for a week with no pick. Privacy rule:
+        identical to GET /leagues/{id}/weeks/{weekId}/picks, just applied
+        across a season of weeks for one membership instead of one week
+        for every membership — the requester's own membership always shows
+        full pick detail (team, opponent, home/away, kickoff, result);
+        another member's pick shows full detail only once its game has
+        kicked off, otherwise only has_picked/is_locked.
+      tags:
+        - Leagues
+      responses:
+        "200":
+          description: The membership's pick history, one entry per week of the season
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MembershipWeekPick"
+        "400":
+          description: membershipId does not resolve to a member of this league
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not a member of this league
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: League not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /leagues/{id}/invite:
     parameters:
       - name: id
@@ -2369,6 +2427,7 @@ components:
         - opponent_name
         - game_id
         - kickoff_at
+        - is_home
         - is_locked
         - is_used_elsewhere
         - is_current_pick
@@ -2393,6 +2452,9 @@ components:
         kickoff_at:
           type: string
           format: date-time
+        is_home:
+          type: boolean
+          description: True if this team is the home team in this game.
         is_locked:
           type: boolean
           description: This team's game has already kicked off.
@@ -2440,6 +2502,52 @@ components:
         team_id:
           type: string
           format: uuid
+
+    MembershipWeekPick:
+      type: object
+      description: >
+        One week of a membership's season, for GET
+        /leagues/{id}/members/{membershipId}/picks. Pick-identifying
+        fields (game_id, team_id, team_name, team_logo_url, opponent_name,
+        opponent_logo_url, is_home, kickoff_at, result) are present only
+        when the caller is entitled to see them — see the endpoint's
+        privacy-rule description. They're omitted together as a bundle,
+        not just team_id, so a not-yet-revealed pick never leaks even
+        indirectly (e.g. via kickoff_at narrowing which game it was).
+      required:
+        - week_number
+        - has_picked
+        - is_locked
+      properties:
+        week_number:
+          type: integer
+        has_picked:
+          type: boolean
+        is_locked:
+          type: boolean
+          description: This pick's game has already kicked off (false, and no pick-identifying fields, for a week with no pick).
+        game_id:
+          type: string
+          format: uuid
+        team_id:
+          type: string
+          format: uuid
+        team_name:
+          type: string
+        team_logo_url:
+          type: string
+        opponent_name:
+          type: string
+        opponent_logo_url:
+          type: string
+        is_home:
+          type: boolean
+        kickoff_at:
+          type: string
+          format: date-time
+        result:
+          type: string
+          enum: [pending, win, loss, void]
 
     TriggerScheduleSyncRequest:
       type: object

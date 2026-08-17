@@ -182,6 +182,41 @@ func isKickedOff(kickoffAt pgtype.Timestamptz) bool {
 	return kickoffAt.Valid && !kickoffAt.Time.After(time.Now())
 }
 
+// MembershipWeekPick is one row of GET .../members/{membershipId}/picks:
+// one week of the season for a single membership, with pick-identifying
+// fields (game/team/opponent/is_home/result) populated only when the
+// caller is entitled to see them — same privacy rule and same "the HTTP
+// layer applies it, this type just carries the raw joined data" split as
+// MemberPickStatus above.
+type MembershipWeekPick struct {
+	Row       gen.ListPicksByMembershipForSeasonRow
+	HasPicked bool
+	IsLocked  bool
+}
+
+// ListMembershipPicksForSeason returns every week of seasonYear for one
+// membership, in week order, whether or not they picked each week. Backs
+// GET .../members/{membershipId}/picks — the leaderboard's per-contestant
+// expandable pick history.
+func (s *Service) ListMembershipPicksForSeason(ctx context.Context, membershipID pgtype.UUID, seasonYear int32) ([]MembershipWeekPick, error) {
+	rows, err := s.queries.ListPicksByMembershipForSeason(ctx, gen.ListPicksByMembershipForSeasonParams{
+		LeagueMembershipID: membershipID,
+		SeasonYear:         seasonYear,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]MembershipWeekPick, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, MembershipWeekPick{
+			Row:       row,
+			HasPicked: row.PickID.Valid,
+			IsLocked:  isKickedOff(row.KickoffAt),
+		})
+	}
+	return out, nil
+}
+
 // UpsertPick validates and creates-or-updates a membership's pick for a
 // week, in this order (matching the API contract exactly):
 //

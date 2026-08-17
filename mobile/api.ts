@@ -214,6 +214,7 @@ export interface AvailableTeam {
   opponent_logo_url?: string;
   game_id: string;
   kickoff_at: string;
+  is_home: boolean;
   is_locked: boolean;
   is_used_elsewhere: boolean;
   is_current_pick: boolean;
@@ -504,6 +505,30 @@ export async function listWeekPicks(
 export async function getLeaderboard(accessToken: string, leagueId: string): Promise<LeaderboardEntry[]> {
   const res = await rawFetch(`/leagues/${leagueId}/leaderboard`, { accessToken });
   return parseJsonOrThrow<LeaderboardEntry[]>(res);
+}
+
+export interface MembershipWeekPick {
+  week_number: number;
+  has_picked: boolean;
+  is_locked: boolean;
+  game_id?: string;
+  team_id?: string;
+  team_name?: string;
+  team_logo_url?: string;
+  opponent_name?: string;
+  opponent_logo_url?: string;
+  is_home?: boolean;
+  kickoff_at?: string;
+  result?: 'pending' | 'win' | 'loss' | 'void';
+}
+
+export async function listMembershipPicks(
+  accessToken: string,
+  leagueId: string,
+  membershipId: string,
+): Promise<MembershipWeekPick[]> {
+  const res = await rawFetch(`/leagues/${leagueId}/members/${membershipId}/picks`, { accessToken });
+  return parseJsonOrThrow<MembershipWeekPick[]>(res);
 }
 
 // --- Notifications (Phase 7) ---

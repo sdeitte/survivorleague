@@ -57,12 +57,53 @@ SELECT
     ot.name AS opponent_name,
     ot.logo_url AS opponent_logo_url,
     g.id AS game_id,
-    g.kickoff_at AS kickoff_at
+    g.kickoff_at AS kickoff_at,
+    (g.home_team_id = t.id) AS is_home
 FROM teams t
 JOIN games g ON g.week_id = sqlc.arg(week_id) AND (g.home_team_id = t.id OR g.away_team_id = t.id)
 JOIN teams ot ON ot.id = (CASE WHEN g.home_team_id = t.id THEN g.away_team_id ELSE g.home_team_id END)
 WHERE t.conference = sqlc.arg(conference)
 ORDER BY g.kickoff_at ASC, t.name ASC;
+
+-- name: ListPicksByMembershipForSeason :many
+-- Every week of the season for one membership (LEFT JOINed against that
+-- membership's pick, if any — a week with no pick still appears, with
+-- null pick/game/team/result/kickoff columns), with team/opponent names
+-- and home/away inline so the leaderboard's expandable per-contestant
+-- history doesn't need N+1 lookups. Backs GET
+-- .../members/{membershipId}/picks; the service/handler layer applies the
+-- same pre-lock privacy rule ListPicksByWeekForLeague's callers do (hiding
+-- every pick-identifying field, not just team_id, for another member's
+-- not-yet-started pick) — this query itself doesn't know who's asking.
+SELECT
+    w.id AS week_id,
+    w.week_number AS week_number,
+    p.id AS pick_id,
+    p.game_id AS game_id,
+    p.team_id AS team_id,
+    p.result AS result,
+    g.kickoff_at AS kickoff_at,
+    t.name AS team_name,
+    t.logo_url AS team_logo_url,
+    ot.name AS opponent_name,
+    ot.logo_url AS opponent_logo_url,
+    -- Selected as the raw nullable column (not a computed
+    -- home_team_id = team_id boolean expression) because sqlc's
+    -- nullability inference doesn't reliably mark a CASE-derived boolean
+    -- as nullable through this join chain, and generating a non-nullable
+    -- Go bool for a column that's genuinely NULL on a no-pick week would
+    -- panic on scan. is_home is computed in Go instead (see
+    -- ListMembershipPicksForSeason) by comparing this against team_id,
+    -- both of which sqlc correctly infers as nullable since they're real
+    -- columns, not derived expressions.
+    g.home_team_id AS home_team_id
+FROM weeks w
+LEFT JOIN picks p ON p.week_id = w.id AND p.league_membership_id = sqlc.arg(league_membership_id)
+LEFT JOIN games g ON g.id = p.game_id
+LEFT JOIN teams t ON t.id = p.team_id
+LEFT JOIN teams ot ON ot.id = (CASE WHEN g.home_team_id = p.team_id THEN g.away_team_id ELSE g.home_team_id END)
+WHERE w.season_year = sqlc.arg(season_year)
+ORDER BY w.week_number ASC;
 
 -- name: ListPicksByWeekForLeague :many
 -- Every non-removed member of the league with their pick status for the

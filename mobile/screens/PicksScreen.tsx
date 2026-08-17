@@ -196,6 +196,36 @@ export function PicksScreen({ leagueId, onBack }: { leagueId: string; onBack: ()
 
       {weekId && (
         <>
+          {availableTeamsQuery.data?.current_pick &&
+            (() => {
+              const pickedTeam = availableTeamsQuery.data!.teams.find((t) => t.is_current_pick);
+              return (
+                <View style={styles.currentPickCard}>
+                  <Text style={styles.currentPickLabel}>
+                    Your pick — {selectedWeek ? `Week ${selectedWeek.week_number}` : 'this week'}
+                  </Text>
+                  {pickedTeam ? (
+                    <>
+                      <Text style={styles.currentPickTeam}>{pickedTeam.team_name}</Text>
+                      <Text style={styles.currentPickMeta}>
+                        {pickedTeam.is_home ? 'vs' : '@'} {pickedTeam.opponent_name} ·{' '}
+                        {new Date(pickedTeam.kickoff_at).toLocaleString(undefined, {
+                          weekday: 'short',
+                          month: 'short',
+                          day: 'numeric',
+                          hour: 'numeric',
+                          minute: '2-digit',
+                        })}
+                      </Text>
+                      {pickedTeam.is_locked && <Text style={styles.currentPickLocked}>Locked</Text>}
+                    </>
+                  ) : (
+                    <Text style={styles.currentPickMeta}>Saved</Text>
+                  )}
+                </View>
+              );
+            })()}
+
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>
               {selectedWeek ? `Week ${selectedWeek.week_number}` : 'This week'}'s teams
@@ -231,7 +261,7 @@ export function PicksScreen({ leagueId, onBack }: { leagueId: string; onBack: ()
                       {team.is_current_pick && <Text style={styles.currentPickBadge}>  Your pick</Text>}
                     </Text>
                     <Text style={styles.teamMeta}>
-                      vs {team.opponent_name} ·{' '}
+                      {team.is_home ? 'vs' : '@'} {team.opponent_name} ·{' '}
                       {new Date(team.kickoff_at).toLocaleString(undefined, {
                         weekday: 'short',
                         month: 'short',
@@ -349,6 +379,33 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 4,
     gap: 2,
+  },
+  currentPickCard: {
+    backgroundColor: '#022c2280',
+    borderWidth: 1,
+    borderColor: '#065f46',
+    borderRadius: 12,
+    padding: 16,
+    gap: 2,
+  },
+  currentPickLabel: {
+    color: '#34d399',
+    fontSize: 12,
+    marginBottom: 2,
+  },
+  currentPickTeam: {
+    color: '#f1f5f9',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  currentPickMeta: {
+    color: '#cbd5e1',
+    fontSize: 13,
+  },
+  currentPickLocked: {
+    color: '#64748b',
+    fontSize: 12,
+    marginTop: 2,
   },
   sectionTitle: {
     color: '#f1f5f9',

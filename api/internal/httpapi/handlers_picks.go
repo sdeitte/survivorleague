@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/sdeitte/survivor-league-api/internal/db"
+	"github.com/sdeitte/survivor-league-api/internal/leagues"
 	"github.com/sdeitte/survivor-league-api/internal/picks"
 	"github.com/sdeitte/survivor-league-api/internal/schedule"
 )
@@ -177,6 +178,7 @@ func (a *API) handleListAvailableTeams(w http.ResponseWriter, r *http.Request) {
 			OpponentLogoURL: t.Row.OpponentLogoUrl.String,
 			GameID:          db.UUIDString(t.Row.GameID),
 			KickoffAt:       formatTimestamp(t.Row.KickoffAt),
+			IsHome:          t.Row.IsHome,
 			IsLocked:        t.IsLocked,
 			IsUsedElsewhere: t.IsUsedElsewhere,
 			IsCurrentPick:   t.IsCurrentPick,
@@ -231,6 +233,74 @@ func (a *API) handleListWeekPicks(w http.ResponseWriter, r *http.Request) {
 		if row.HasPicked && (isOwn || row.IsLocked) {
 			resp.GameID = db.UUIDString(row.Row.GameID)
 			resp.TeamID = db.UUIDString(row.Row.TeamID)
+		}
+		out = append(out, resp)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleListMembershipPicks implements GET
+// /leagues/:id/members/:membershipId/picks (requireLeagueMember) — the
+// leaderboard's per-contestant expandable pick history: every week of the
+// league's season for one membership. Privacy rule: identical to
+// handleListWeekPicks', just applied across a season of weeks for one
+// membership instead of one week for every membership — the requester's
+// own membership always shows full pick detail; another member's pick
+// shows full detail only once its game has kicked off, otherwise just
+// has_picked.
+func (a *API) handleListMembershipPicks(w http.ResponseWriter, r *http.Request) {
+	lc, ok := LeagueFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusForbidden, "not a member of this league")
+		return
+	}
+
+	membershipID, err := db.ParseUUID(chi.URLParam(r, "membershipId"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid membership id")
+		return
+	}
+
+	target, err := a.leaguesService.GetMembershipByID(r.Context(), membershipID)
+	if err != nil {
+		if errors.Is(err, leagues.ErrMembershipNotFound) {
+			writeError(w, http.StatusBadRequest, "membership not found in this league")
+			return
+		}
+		log.Printf("get membership for picks history: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to load membership")
+		return
+	}
+	if target.LeagueID != lc.League.ID {
+		writeError(w, http.StatusBadRequest, "membership not found in this league")
+		return
+	}
+
+	rows, err := a.picksService.ListMembershipPicksForSeason(r.Context(), membershipID, lc.League.SeasonYear)
+	if err != nil {
+		log.Printf("list membership picks for season: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to list picks")
+		return
+	}
+
+	isOwn := membershipID == lc.Membership.ID
+	out := make([]membershipWeekPickResponse, 0, len(rows))
+	for _, row := range rows {
+		resp := membershipWeekPickResponse{
+			WeekNumber: row.Row.WeekNumber,
+			HasPicked:  row.HasPicked,
+			IsLocked:   row.IsLocked,
+		}
+		if row.HasPicked && (isOwn || row.IsLocked) {
+			resp.GameID = db.UUIDString(row.Row.GameID)
+			resp.TeamID = db.UUIDString(row.Row.TeamID)
+			resp.TeamName = row.Row.TeamName.String
+			resp.TeamLogoURL = row.Row.TeamLogoUrl.String
+			resp.OpponentName = row.Row.OpponentName.String
+			resp.OpponentLogoURL = row.Row.OpponentLogoUrl.String
+			resp.IsHome = row.Row.HomeTeamID.Valid && row.Row.HomeTeamID == row.Row.TeamID
+			resp.KickoffAt = formatTimestamp(row.Row.KickoffAt)
+			resp.Result = row.Row.Result.String
 		}
 		out = append(out, resp)
 	}

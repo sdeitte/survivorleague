@@ -454,6 +454,83 @@ func TestService_ListAvailableTeams_LockedAndUsedFlags(t *testing.T) {
 	}
 }
 
+// TestService_ListMembershipPicksForSeason covers the season-wide history
+// backing the leaderboard's expandable card: every week of the season
+// appears (not just weeks with a pick — week2 here has none), in week
+// order, with HasPicked/IsLocked correctly reflecting each week's actual
+// state. Field-bundling privacy (hiding team/opponent/result together,
+// not just team_id) is the HTTP handler's job — see
+// handleListMembershipPicks — verified by curl E2E per this repo's
+// established convention (no Go-level HTTP dispatch tests anywhere in
+// this codebase); this test only covers what the service itself computes.
+func TestService_ListMembershipPicksForSeason(t *testing.T) {
+	f := newFixture(t, 48*time.Hour)
+
+	if _, err := f.env.picks.UpsertPick(context.Background(), f.member.ID, f.week1.ID, f.league.Conference, f.gameA1.ID, f.teamA.ID); err != nil {
+		t.Fatalf("week1 pick: %v", err)
+	}
+	// week2: deliberately no pick, to prove it still appears in the result.
+
+	// f.league.SeasonYear (hardcoded 2026 by newFixture's CreateLeague
+	// call) is NOT the same value as week1/week2's actual season_year
+	// (newFixture seeds those from uniqueSeasonYear() instead, and
+	// nothing else in this file depends on the two matching) — use the
+	// week's own SeasonYear, the real value this endpoint's season-scoped
+	// query needs.
+	rows, err := f.env.picks.ListMembershipPicksForSeason(context.Background(), f.member.ID, f.week1.SeasonYear)
+	if err != nil {
+		t.Fatalf("ListMembershipPicksForSeason: %v", err)
+	}
+	if len(rows) < 2 {
+		t.Fatalf("got %d weeks, want at least 2 (week1 + week2)", len(rows))
+	}
+	// Season order.
+	for i := 1; i < len(rows); i++ {
+		if rows[i].Row.WeekNumber < rows[i-1].Row.WeekNumber {
+			t.Fatalf("weeks not in ascending order: %+v", rows)
+		}
+	}
+
+	var row1, row2 *MembershipWeekPick
+	for i := range rows {
+		switch rows[i].Row.WeekNumber {
+		case f.week1.WeekNumber:
+			row1 = &rows[i]
+		case f.week2.WeekNumber:
+			row2 = &rows[i]
+		}
+	}
+	if row1 == nil || row2 == nil {
+		t.Fatalf("expected both week1 (%d) and week2 (%d) in result, got %+v", f.week1.WeekNumber, f.week2.WeekNumber, rows)
+	}
+	if !row1.HasPicked || row1.Row.TeamID != f.teamA.ID {
+		t.Errorf("week1: HasPicked=%v TeamID=%v, want HasPicked=true TeamID=%v", row1.HasPicked, row1.Row.TeamID, f.teamA.ID)
+	}
+	if row1.IsLocked {
+		t.Error("week1.IsLocked = true, want false (kickoff is 48h out)")
+	}
+	if row2.HasPicked {
+		t.Error("week2.HasPicked = true, want false (no pick made for week2)")
+	}
+	if row2.Row.TeamID.Valid {
+		t.Errorf("week2.Row.TeamID = %v, want invalid/null (no pick this week)", row2.Row.TeamID)
+	}
+
+	setKickoffInPast(t, f.env.pool, f.gameA1.ID)
+
+	rowsAfter, err := f.env.picks.ListMembershipPicksForSeason(context.Background(), f.member.ID, f.week1.SeasonYear)
+	if err != nil {
+		t.Fatalf("ListMembershipPicksForSeason (post-lock): %v", err)
+	}
+	for i := range rowsAfter {
+		if rowsAfter[i].Row.WeekNumber == f.week1.WeekNumber {
+			if !rowsAfter[i].IsLocked {
+				t.Error("week1.IsLocked = false after kickoff passed, want true")
+			}
+		}
+	}
+}
+
 // TestService_ListWeekPicks_PrivacyRule is the pick-visibility test: before
 // a game kicks off, another member's game_id/team_id must not be
 // resolvable from ListWeekPicks's result at all (both fields blank

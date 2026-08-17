@@ -415,6 +415,7 @@ type availableTeamResponse struct {
 	OpponentLogoURL string `json:"opponent_logo_url,omitempty"`
 	GameID          string `json:"game_id"`
 	KickoffAt       string `json:"kickoff_at"`
+	IsHome          bool   `json:"is_home"`
 	IsLocked        bool   `json:"is_locked"`
 	IsUsedElsewhere bool   `json:"is_used_elsewhere"`
 	IsCurrentPick   bool   `json:"is_current_pick"`
@@ -440,6 +441,31 @@ type memberPickStatusResponse struct {
 	HasPicked    bool   `json:"has_picked"`
 	GameID       string `json:"game_id,omitempty"`
 	TeamID       string `json:"team_id,omitempty"`
+}
+
+// membershipWeekPickResponse is one row of GET
+// .../members/{membershipId}/picks: one week of the season, with
+// pick-identifying fields present only when the caller is entitled to see
+// them (own membership always; another member's pick only once its game
+// has kicked off) — every one of TeamID/TeamName/OpponentName/IsHome/
+// Result is omitted together as a bundle, not just TeamID, so a
+// not-yet-revealed pick never leaks even indirectly (e.g. via a
+// team-specific result). Mirrors memberPickStatusResponse's privacy
+// treatment, just across a season of weeks for one membership instead of
+// one week for every membership.
+type membershipWeekPickResponse struct {
+	WeekNumber      int32  `json:"week_number"`
+	HasPicked       bool   `json:"has_picked"`
+	GameID          string `json:"game_id,omitempty"`
+	TeamID          string `json:"team_id,omitempty"`
+	TeamName        string `json:"team_name,omitempty"`
+	TeamLogoURL     string `json:"team_logo_url,omitempty"`
+	OpponentName    string `json:"opponent_name,omitempty"`
+	OpponentLogoURL string `json:"opponent_logo_url,omitempty"`
+	IsHome          bool   `json:"is_home,omitempty"`
+	KickoffAt       string `json:"kickoff_at,omitempty"`
+	Result          string `json:"result,omitempty"`
+	IsLocked        bool   `json:"is_locked"`
 }
 
 // --- Notifications (Phase 7) ---

@@ -222,6 +222,36 @@ export function PicksPage() {
 
         {weekId && (
           <>
+            {availableTeamsQuery.data?.current_pick &&
+              (() => {
+                const pickedTeam = availableTeamsQuery.data!.teams.find((t) => t.is_current_pick)
+                return (
+                  <section className="rounded-xl border border-emerald-800/60 bg-emerald-950/30 p-4">
+                    <p className="text-xs text-emerald-400 mb-1">
+                      Your pick — {selectedWeek ? `Week ${selectedWeek.week_number}` : 'this week'}
+                    </p>
+                    {pickedTeam ? (
+                      <>
+                        <p className="text-lg font-semibold text-slate-100">{pickedTeam.team_name}</p>
+                        <p className="text-sm text-slate-300">
+                          {pickedTeam.is_home ? 'vs' : '@'} {pickedTeam.opponent_name} ·{' '}
+                          {new Date(pickedTeam.kickoff_at).toLocaleString(undefined, {
+                            weekday: 'short',
+                            month: 'short',
+                            day: 'numeric',
+                            hour: 'numeric',
+                            minute: '2-digit',
+                          })}
+                        </p>
+                        {pickedTeam.is_locked && <p className="text-xs text-slate-500 mt-1">Locked</p>}
+                      </>
+                    ) : (
+                      <p className="text-sm text-slate-300">Saved</p>
+                    )}
+                  </section>
+                )
+              })()}
+
             <section className="rounded-xl border border-slate-800 bg-slate-900 divide-y divide-slate-800">
               <h2 className="p-4 text-sm font-medium text-slate-200">
                 {selectedWeek ? `Week ${selectedWeek.week_number}` : 'This week'}'s teams
@@ -263,7 +293,8 @@ export function PicksPage() {
                         {team.is_current_pick && <span className="ml-2 text-xs text-emerald-400">Your pick</span>}
                       </p>
                       <p className="text-xs text-slate-400">
-                        vs {team.opponent_name} · {new Date(team.kickoff_at).toLocaleString(undefined, {
+                        {team.is_home ? 'vs' : '@'} {team.opponent_name} ·{' '}
+                        {new Date(team.kickoff_at).toLocaleString(undefined, {
                           weekday: 'short',
                           month: 'short',
                           day: 'numeric',
