@@ -28,6 +28,74 @@ func (q *Queries) GetWeekByID(ctx context.Context, id pgtype.UUID) (Week, error)
 	return i, err
 }
 
+const getWeekBySeasonAndNumber = `-- name: GetWeekBySeasonAndNumber :one
+SELECT id, season_year, week_number, created_at, updated_at FROM weeks WHERE season_year = $1 AND week_number = $2
+`
+
+type GetWeekBySeasonAndNumberParams struct {
+	SeasonYear int32 `json:"season_year"`
+	WeekNumber int32 `json:"week_number"`
+}
+
+// Backs RefreshWeek: the week must already exist (created by the daily
+// full SyncSeason) — a narrow week refresh never creates a week itself.
+func (q *Queries) GetWeekBySeasonAndNumber(ctx context.Context, arg GetWeekBySeasonAndNumberParams) (Week, error) {
+	row := q.db.QueryRow(ctx, getWeekBySeasonAndNumber, arg.SeasonYear, arg.WeekNumber)
+	var i Week
+	err := row.Scan(
+		&i.ID,
+		&i.SeasonYear,
+		&i.WeekNumber,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const listLiveWindowWeeks = `-- name: ListLiveWindowWeeks :many
+SELECT DISTINCT w.season_year, w.week_number
+FROM games g
+JOIN weeks w ON w.id = g.week_id
+WHERE g.kickoff_at <= $1::timestamptz
+  AND g.kickoff_at >= $2::timestamptz
+  AND g.status <> 'final'
+`
+
+type ListLiveWindowWeeksParams struct {
+	Now         pgtype.Timestamptz `json:"now"`
+	WindowStart pgtype.Timestamptz `json:"window_start"`
+}
+
+type ListLiveWindowWeeksRow struct {
+	SeasonYear int32 `json:"season_year"`
+	WeekNumber int32 `json:"week_number"`
+}
+
+// Distinct (season_year, week_number) among games currently inside the
+// live poll window: kicked off but not yet final, and not so long ago
+// that they've fallen out the far end of the window. This is the live
+// poll loop's cheap "is there anything to even check" gate — a
+// zero-row result means no CFBD call is made this tick at all.
+func (q *Queries) ListLiveWindowWeeks(ctx context.Context, arg ListLiveWindowWeeksParams) ([]ListLiveWindowWeeksRow, error) {
+	rows, err := q.db.Query(ctx, listLiveWindowWeeks, arg.Now, arg.WindowStart)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListLiveWindowWeeksRow{}
+	for rows.Next() {
+		var i ListLiveWindowWeeksRow
+		if err := rows.Scan(&i.SeasonYear, &i.WeekNumber); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWeeksBySeasonYear = `-- name: ListWeeksBySeasonYear :many
 SELECT id, season_year, week_number, created_at, updated_at FROM weeks WHERE season_year = $1 ORDER BY week_number ASC
 `

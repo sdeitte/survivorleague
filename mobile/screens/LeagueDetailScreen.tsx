@@ -9,10 +9,12 @@ export function LeagueDetailScreen({
   leagueId,
   onBack,
   onNavigateToPicks,
+  onNavigateToLeaderboard,
 }: {
   leagueId: string;
   onBack: () => void;
   onNavigateToPicks: (leagueId: string) => void;
+  onNavigateToLeaderboard: (leagueId: string) => void;
 }) {
   const { authFetch } = useAuth();
   const queryClient = useQueryClient();
@@ -115,9 +117,14 @@ export function LeagueDetailScreen({
         keyExtractor={(item) => item.membership_id}
         ListHeaderComponent={
           <>
-            <Pressable style={styles.pickButton} onPress={() => onNavigateToPicks(leagueId)}>
-              <Text style={styles.pickButtonText}>Make your pick</Text>
-            </Pressable>
+            <View style={styles.actionsRow}>
+              <Pressable style={[styles.pickButton, styles.actionButton]} onPress={() => onNavigateToPicks(leagueId)}>
+                <Text style={styles.pickButtonText}>Make your pick</Text>
+              </Pressable>
+              <Pressable style={[styles.buttonOutline, styles.actionButton]} onPress={() => onNavigateToLeaderboard(leagueId)}>
+                <Text style={styles.buttonOutlineText}>Leaderboard</Text>
+              </Pressable>
+            </View>
 
             <View style={styles.card}>
               <View style={styles.rowBetween}>
@@ -215,6 +222,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textDecorationLine: 'underline',
     marginBottom: 8,
+  },
+  actionsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  actionButton: {
+    flex: 1,
+    marginBottom: 0,
+    alignItems: 'center',
   },
   pickButton: {
     backgroundColor: '#059669',

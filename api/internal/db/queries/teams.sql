@@ -21,3 +21,10 @@ ORDER BY name ASC;
 
 -- name: GetTeamByID :one
 SELECT * FROM teams WHERE id = sqlc.arg(id);
+
+-- name: GetTeamByExternalID :one
+-- Backs RefreshWeek's team-id resolution: unlike SyncSeason (which
+-- upserts every team fresh from a /teams/fbs response), a narrow week
+-- refresh only pulls /games and needs to resolve CFBD's homeId/awayId
+-- against teams already synced by the daily full sync.
+SELECT * FROM teams WHERE external_id = sqlc.arg(external_id);

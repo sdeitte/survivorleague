@@ -27,14 +27,29 @@ type Querier interface {
 	// was clearly designed for exactly this kind of run metadata.
 	CreateSyncRun(ctx context.Context, arg CreateSyncRunParams) (SyncRun, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	// game_id may be a NULL narg (the missed-pick case — nothing to point
+	// eliminated_game_id at).
+	EliminateMembership(ctx context.Context, arg EliminateMembershipParams) (LeagueMembership, error)
 	FinishSyncRun(ctx context.Context, arg FinishSyncRunParams) (SyncRun, error)
 	// Active = not revoked and not expired. Callers should treat "no rows" as
 	// "invalid or already-used token" without distinguishing why, to avoid
 	// leaking timing/existence information.
 	GetActiveRefreshTokenByHash(ctx context.Context, tokenHash string) (RefreshToken, error)
 	GetGameByIDWithTeams(ctx context.Context, id pgtype.UUID) (GetGameByIDWithTeamsRow, error)
+	// Phase 5: grading/elimination pipeline queries. See internal/grading's
+	// package doc comment for the full GradeGame/TryFinalizeLeagueWeek
+	// contract these back.
+	// Row-locked read of a game for GradeGame. Locking here (rather than a
+	// plain SELECT) is what makes the graded_at IS NULL check-then-set
+	// atomic across concurrent callers: a second GradeGame(gameID) call for
+	// the same game blocks on this lock until the first transaction commits
+	// (graded_at now set), then sees GradedAt already valid and no-ops —
+	// exactly the "a re-fired poll can never double-grade" guarantee.
+	GetGameForGradingForUpdate(ctx context.Context, id pgtype.UUID) (Game, error)
 	GetLeagueByID(ctx context.Context, id pgtype.UUID) (League, error)
 	GetLeagueByInviteCode(ctx context.Context, inviteCode string) (League, error)
+	GetLeagueMembershipByID(ctx context.Context, id pgtype.UUID) (LeagueMembership, error)
+	GetLeagueWeekResultByLeagueAndWeek(ctx context.Context, arg GetLeagueWeekResultByLeagueAndWeekParams) (LeagueWeekResult, error)
 	// Excludes removed members by design: this backs requireLeagueMember, where
 	// a removed_at row must behave exactly like "never joined" (403).
 	GetMembershipByLeagueAndUser(ctx context.Context, arg GetMembershipByLeagueAndUserParams) (LeagueMembership, error)
@@ -47,11 +62,38 @@ type Querier interface {
 	// (league_membership_id, week_id) can't race past the lock check between
 	// "read the current pick's game" and "write the new one".
 	GetPickByMembershipAndWeekForUpdate(ctx context.Context, arg GetPickByMembershipAndWeekForUpdateParams) (Pick, error)
+	// Backs RefreshWeek's team-id resolution: unlike SyncSeason (which
+	// upserts every team fresh from a /teams/fbs response), a narrow week
+	// refresh only pulls /games and needs to resolve CFBD's homeId/awayId
+	// against teams already synced by the daily full sync.
+	GetTeamByExternalID(ctx context.Context, externalID string) (Team, error)
 	GetTeamByID(ctx context.Context, id pgtype.UUID) (Team, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 	GetWeekByID(ctx context.Context, id pgtype.UUID) (Week, error)
+	// Backs RefreshWeek: the week must already exist (created by the daily
+	// full SyncSeason) — a narrow week refresh never creates a week itself.
+	GetWeekBySeasonAndNumber(ctx context.Context, arg GetWeekBySeasonAndNumberParams) (Week, error)
+	// Grades every still-pending pick on this game in one statement: win if
+	// the pick's team is the game's winner, loss otherwise. Only ever called
+	// after the caller has confirmed winner_team_id IS NOT NULL (a tie/
+	// undetermined winner is left ungraded entirely, never reaches this
+	// query) — otherwise every pick would wrongly grade as a loss, since
+	// `team_id = NULL` is never true in SQL.
+	GradePicksForGame(ctx context.Context, arg GradePicksForGameParams) error
+	// The idempotency guard for league-week finalization: ON CONFLICT DO
+	// NOTHING against UNIQUE(league_id, week_id) means a second concurrent
+	// (or re-fired) TryFinalizeLeagueWeek call for the same league/week gets
+	// zero rows back (mapped by the service to pgx.ErrNoRows, same pattern as
+	// UpsertLeagueMembershipOnJoin) — "another concurrent call already
+	// finalized this, skip". Elimination side effects are only ever applied
+	// by the caller that actually wins this insert.
+	InsertLeagueWeekResultIfAbsent(ctx context.Context, arg InsertLeagueWeekResultIfAbsentParams) (LeagueWeekResult, error)
 	LeagueInviteCodeExists(ctx context.Context, inviteCode string) (bool, error)
+	// Every membership that actually participates in grading/elimination:
+	// status='active' (not already eliminated), is_contestant=true (a
+	// manage-only commissioner never plays), removed_at IS NULL.
+	ListActiveContestantMembershipsForLeague(ctx context.Context, leagueID pgtype.UUID) ([]LeagueMembership, error)
 	ListActiveMembersWithUser(ctx context.Context, leagueID pgtype.UUID) ([]ListActiveMembersWithUserRow, error)
 	// Every team in the league's conference that has a game in the given week,
 	// with its opponent, game id, and kickoff time inline so the picks screen
@@ -59,12 +101,47 @@ type Querier interface {
 	// the service layer (the former against time.Now(), the latter against
 	// ListUsedTeamIDsForMembershipExcludingWeek's result), not this query.
 	ListAvailableTeamsForWeek(ctx context.Context, arg ListAvailableTeamsForWeekParams) ([]ListAvailableTeamsForWeekRow, error)
+	// Every game in the week where either team belongs to the given
+	// conference — the set TryFinalizeLeagueWeek must fully resolve (no
+	// postponed/canceled, all final) before a league's week can finalize.
+	ListConferenceRelevantGamesForWeek(ctx context.Context, arg ListConferenceRelevantGamesForWeekParams) ([]Game, error)
 	// Joined with both teams' name/conference/logo so clients don't need N+1
 	// lookups per the GET /weeks/:id/games contract.
 	ListGamesByWeekWithTeams(ctx context.Context, weekID pgtype.UUID) ([]ListGamesByWeekWithTeamsRow, error)
+	// Backs GET /leagues/:id/leaderboard. Every non-removed membership
+	// (contestants and manage-only commissioners alike — the API contract
+	// doesn't exclude non-contestants, it just documents their is_contestant
+	// flag so clients can badge them differently). Sort: active first (a
+	// non-contestant's status is always 'active' since they never play, so
+	// they naturally land in this bucket), then eliminated members ordered by
+	// how late they were eliminated (joined against weeks.week_number, since
+	// eliminated_week_id is a UUID with no inherent order) — descending, so
+	// "eliminated later" (survived longer) ranks higher. display_name is a
+	// final stable tie-break.
+	ListLeaderboardForLeague(ctx context.Context, leagueID pgtype.UUID) ([]ListLeaderboardForLeagueRow, error)
+	// Every distinct league with at least one pick on this game — the
+	// "(league_id, week_id) pairs touched by picks on this game" GradeGame's
+	// contract calls for (week_id is simply the game's own week_id, constant
+	// across all of them, so only league_id varies here).
+	ListLeagueIDsWithPicksForGame(ctx context.Context, gameID pgtype.UUID) ([]pgtype.UUID, error)
+	// Every distinct league with at least one pick for this week — used by the
+	// live poll loop to know which leagues to attempt TryFinalizeLeagueWeek
+	// for after refreshing a week's games. NOTE: a league whose contestants
+	// ALL missed their pick that week (zero picks rows at all) won't appear
+	// here — a known, documented gap (no game ever "finishes" to trigger this
+	// league's finalization in that scenario); resolving it is out of this
+	// phase's scope (would need a periodic sweep, not just a
+	// game-finalization trigger).
+	ListLeagueIDsWithPicksForWeek(ctx context.Context, weekID pgtype.UUID) ([]pgtype.UUID, error)
 	// Leagues the given user has a non-removed membership in, along with their
 	// role/is_contestant/status in each (GET /leagues needs both in one shot).
 	ListLeaguesForUser(ctx context.Context, userID pgtype.UUID) ([]ListLeaguesForUserRow, error)
+	// Distinct (season_year, week_number) among games currently inside the
+	// live poll window: kicked off but not yet final, and not so long ago
+	// that they've fallen out the far end of the window. This is the live
+	// poll loop's cheap "is there anything to even check" gate — a
+	// zero-row result means no CFBD call is made this tick at all.
+	ListLiveWindowWeeks(ctx context.Context, arg ListLiveWindowWeeksParams) ([]ListLiveWindowWeeksRow, error)
 	// Every non-removed member of the league with their pick status for the
 	// given week (LEFT JOINed — members with no pick yet still appear, with
 	// null pick/game/team/kickoff columns). Backs GET .../picks; the service
@@ -81,6 +158,10 @@ type Querier interface {
 	// no row anywhere holds it). Backs available-teams' is_used_elsewhere.
 	ListUsedTeamIDsForMembershipExcludingWeek(ctx context.Context, arg ListUsedTeamIDsForMembershipExcludingWeekParams) ([]pgtype.UUID, error)
 	ListWeeksBySeasonYear(ctx context.Context, seasonYear int32) ([]Week, error)
+	// Sets the graded_at idempotency guard. WHERE graded_at IS NULL is
+	// defensive redundancy on top of the FOR UPDATE row lock above — belt and
+	// suspenders against ever re-grading a game.
+	MarkGameGraded(ctx context.Context, id pgtype.UUID) error
 	// Soft-delete: only affects a currently-active (non-removed) row scoped to
 	// the given league, so this doubles as the "membership belongs to this
 	// league and isn't already removed" check — no rows back means 404/400 to

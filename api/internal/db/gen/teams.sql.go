@@ -11,6 +11,29 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getTeamByExternalID = `-- name: GetTeamByExternalID :one
+SELECT id, external_id, name, conference, logo_url, created_at, updated_at FROM teams WHERE external_id = $1
+`
+
+// Backs RefreshWeek's team-id resolution: unlike SyncSeason (which
+// upserts every team fresh from a /teams/fbs response), a narrow week
+// refresh only pulls /games and needs to resolve CFBD's homeId/awayId
+// against teams already synced by the daily full sync.
+func (q *Queries) GetTeamByExternalID(ctx context.Context, externalID string) (Team, error) {
+	row := q.db.QueryRow(ctx, getTeamByExternalID, externalID)
+	var i Team
+	err := row.Scan(
+		&i.ID,
+		&i.ExternalID,
+		&i.Name,
+		&i.Conference,
+		&i.LogoUrl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getTeamByID = `-- name: GetTeamByID :one
 SELECT id, external_id, name, conference, logo_url, created_at, updated_at FROM teams WHERE id = $1
 `

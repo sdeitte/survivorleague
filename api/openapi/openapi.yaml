@@ -10,13 +10,16 @@ info:
     endpoints. Phase 2 added league CRUD, membership, the invite-code join
     flow, and the conferences list. Phase 3 added read-only schedule
     endpoints (weeks/games/teams, populated by a CFBD sync) and the first
-    site-admin endpoints (triggering/viewing that sync). Phase 4 adds pick
+    site-admin endpoints (triggering/viewing that sync). Phase 4 added pick
     submission/retrieval with server-enforced per-game locking and the
     no-repeat-team rule, plus pre-lock pick-hiding for other league members.
-    Leaderboard and the rest of site-admin are added incrementally in later
+    Phase 5 adds the leaderboard endpoint — the grading/elimination pipeline
+    and the live poll loop that drives it are internal (internal/grading,
+    internal/livepoll), not client-facing API surface. Buy-back, admin
+    views, and the rest of site-admin are added incrementally in later
     phases per the roadmap — see
     /Users/sdeitte/.claude/plans/witty-questing-barto.md.
-  version: 0.4.0
+  version: 0.5.0
 servers:
   - url: http://localhost:8080
     description: Local development
@@ -447,6 +450,49 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Member"
+        "403":
+          description: Not a member of this league
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: League not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /leagues/{id}/leaderboard:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getLeagueLeaderboard
+      summary: Get a league's standings
+      description: >
+        Requires a non-removed membership in the league (requireLeagueMember).
+        Returns every non-removed membership (contestants and manage-only
+        commissioners alike) in standings order: active members first, then
+        eliminated members ordered by eliminated_week_id descending (later
+        elimination = survived longer = ranks higher among the eliminated).
+        `bought_back` is always `false` for now — Phase 6 hasn't been built
+        yet — but is included from day one for forward compatibility.
+      tags:
+        - Leagues
+      responses:
+        "200":
+          description: The league's standings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LeaderboardEntry"
         "403":
           description: Not a member of this league
           content:
@@ -1308,6 +1354,36 @@ components:
         joined_at:
           type: string
           format: date-time
+
+    LeaderboardEntry:
+      type: object
+      description: >
+        One membership's row in a league's standings — see
+        GET /leagues/{id}/leaderboard's description for the sort contract.
+      required:
+        - membership_id
+        - display_name
+        - status
+        - is_contestant
+        - bought_back
+      properties:
+        membership_id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+        status:
+          type: string
+          enum: [active, eliminated]
+        is_contestant:
+          type: boolean
+        eliminated_week_id:
+          type: string
+          format: uuid
+          description: Present only when status=eliminated.
+        bought_back:
+          type: boolean
+          description: Always false until Phase 6 (buy-back) is built.
 
     InviteCodeResponse:
       type: object

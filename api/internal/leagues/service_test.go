@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/sdeitte/survivor-league-api/internal/db/gen"
@@ -365,5 +366,92 @@ func TestService_UpdateCommissionerIsContestant(t *testing.T) {
 	}
 	if updated.Role != "commissioner" {
 		t.Errorf("Role changed unexpectedly to %q", updated.Role)
+	}
+}
+
+// TestService_ListLeaderboard_SortOrder is a Phase 5 test: active members
+// must sort ahead of eliminated ones, and among the eliminated, the one
+// eliminated LATER (survived longer) must rank higher — confirmed here by
+// directly writing elimination state via the same EliminateMembership
+// query internal/grading uses, since this package has no grading
+// dependency of its own.
+func TestService_ListLeaderboard_SortOrder(t *testing.T) {
+	s, q := newTestService(t)
+	commissioner := createTestUser(t, q, "commish") // stays active
+	player4 := createTestUser(t, q, "player4")      // stays active
+	player2 := createTestUser(t, q, "player2")      // eliminated week 1 (earlier)
+	player3 := createTestUser(t, q, "player3")      // eliminated week 2 (later — survived longer)
+
+	league, commissionerMembership := createTestLeague(t, s, commissioner)
+
+	m4, err := s.JoinByCode(context.Background(), league.ID, player4.ID)
+	if err != nil {
+		t.Fatalf("JoinByCode player4: %v", err)
+	}
+	m2, err := s.JoinByCode(context.Background(), league.ID, player2.ID)
+	if err != nil {
+		t.Fatalf("JoinByCode player2: %v", err)
+	}
+	m3, err := s.JoinByCode(context.Background(), league.ID, player3.ID)
+	if err != nil {
+		t.Fatalf("JoinByCode player3: %v", err)
+	}
+
+	seasonYear := int32(92500 + int(time.Now().UnixNano()%2000))
+	week1, err := q.UpsertWeek(context.Background(), gen.UpsertWeekParams{SeasonYear: seasonYear, WeekNumber: 1})
+	if err != nil {
+		t.Fatalf("UpsertWeek 1: %v", err)
+	}
+	week2, err := q.UpsertWeek(context.Background(), gen.UpsertWeekParams{SeasonYear: seasonYear, WeekNumber: 2})
+	if err != nil {
+		t.Fatalf("UpsertWeek 2: %v", err)
+	}
+
+	if _, err := q.EliminateMembership(context.Background(), gen.EliminateMembershipParams{ID: m2.ID, WeekID: week1.ID}); err != nil {
+		t.Fatalf("EliminateMembership player2: %v", err)
+	}
+	if _, err := q.EliminateMembership(context.Background(), gen.EliminateMembershipParams{ID: m3.ID, WeekID: week2.ID}); err != nil {
+		t.Fatalf("EliminateMembership player3: %v", err)
+	}
+
+	rows, err := s.ListLeaderboard(context.Background(), league.ID)
+	if err != nil {
+		t.Fatalf("ListLeaderboard: %v", err)
+	}
+	if len(rows) != 4 {
+		t.Fatalf("ListLeaderboard returned %d rows, want 4", len(rows))
+	}
+
+	// The two active members (order between them is a display_name
+	// tie-break, "commish" < "player4") come first, then eliminated
+	// members ordered by eliminated_week_id descending: player3 (week2,
+	// eliminated later) ranks above player2 (week1).
+	wantOrder := []struct {
+		membershipID pgtype.UUID
+		status       string
+	}{
+		{commissionerMembership.ID, "active"},
+		{m4.ID, "active"},
+		{m3.ID, "eliminated"},
+		{m2.ID, "eliminated"},
+	}
+	for i, want := range wantOrder {
+		if rows[i].MembershipID != want.membershipID {
+			t.Errorf("row %d membership_id = %v, want %v (status=%s)", i, rows[i].MembershipID, want.membershipID, want.status)
+		}
+		if rows[i].Status != want.status {
+			t.Errorf("row %d status = %q, want %q", i, rows[i].Status, want.status)
+		}
+	}
+	if rows[2].EliminatedWeekID != week2.ID {
+		t.Errorf("row 2 (player3) eliminated_week_id = %v, want week2 (%v)", rows[2].EliminatedWeekID, week2.ID)
+	}
+	if rows[3].EliminatedWeekID != week1.ID {
+		t.Errorf("row 3 (player2) eliminated_week_id = %v, want week1 (%v)", rows[3].EliminatedWeekID, week1.ID)
+	}
+	for _, row := range rows {
+		if row.BoughtBack {
+			t.Errorf("row %s BoughtBack = true, want false (Phase 6 not built yet)", row.MembershipID)
+		}
 	}
 }

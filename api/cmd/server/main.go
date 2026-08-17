@@ -7,10 +7,13 @@
 // schedule ingestion (internal/schedule), the site-admin sync-trigger
 // endpoints (internal/admin, the first real use of requireSiteAdmin), and a
 // daily cron job that keeps the schedule in sync automatically — additive
-// to the manual admin endpoint, not a replacement. Route wiring lives in
+// to the manual admin endpoint, not a replacement. Phase 5 adds the
+// grading/elimination pipeline (internal/grading) and the adaptive live
+// poll loop (internal/livepoll) that drives it. Route wiring lives in
 // internal/httpapi; this file just reads configuration from the
 // environment, assembles dependencies, and owns process lifecycle (HTTP
-// server + cron scheduler, both stopped cleanly on shutdown).
+// server + cron scheduler + live poll loop, all stopped cleanly on
+// shutdown).
 package main
 
 import (
@@ -29,8 +32,10 @@ import (
 	"github.com/sdeitte/survivor-league-api/internal/auth"
 	"github.com/sdeitte/survivor-league-api/internal/db"
 	"github.com/sdeitte/survivor-league-api/internal/db/gen"
+	"github.com/sdeitte/survivor-league-api/internal/grading"
 	"github.com/sdeitte/survivor-league-api/internal/httpapi"
 	"github.com/sdeitte/survivor-league-api/internal/leagues"
+	"github.com/sdeitte/survivor-league-api/internal/livepoll"
 	"github.com/sdeitte/survivor-league-api/internal/picks"
 	"github.com/sdeitte/survivor-league-api/internal/schedule"
 )
@@ -102,6 +107,7 @@ func main() {
 	scheduleService := schedule.NewService(queries, cfbdClient)
 	adminService := admin.NewService(queries, scheduleService)
 	picksService := picks.NewService(queries, pool)
+	gradingService := grading.NewService(queries, pool)
 
 	router := httpapi.NewRouter(httpapi.Deps{
 		Pool:              pool,
@@ -149,6 +155,16 @@ func main() {
 	}
 	cronScheduler.Start()
 
+	// --- Live poll loop (Phase 5) ---
+	//
+	// A single background ticker, separate from the daily cron above: it
+	// checks every ~90s whether any game is inside its live window
+	// (kicked off, not yet final) and only then refreshes that game's
+	// week from CFBD and grades any games that just finished. See
+	// internal/livepoll's package doc comment for the full design.
+	poller := livepoll.NewPoller(scheduleService, gradingService)
+	poller.Start(context.Background())
+
 	server := &http.Server{
 		Addr:    ":" + port,
 		Handler: router,
@@ -173,6 +189,8 @@ func main() {
 	case <-time.After(30 * time.Second):
 		log.Print("timed out waiting for in-flight cron jobs to finish")
 	}
+
+	poller.Stop() // blocks until any in-flight tick finishes
 
 	httpShutdownCtx, cancelHTTPShutdown := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancelHTTPShutdown()

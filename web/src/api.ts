@@ -127,6 +127,17 @@ export interface MemberPickStatus {
   team_id?: string
 }
 
+// --- Leaderboard (Phase 5) ---
+
+export interface LeaderboardEntry {
+  membership_id: string
+  display_name: string
+  status: 'active' | 'eliminated'
+  is_contestant: boolean
+  eliminated_week_id?: string
+  bought_back: boolean
+}
+
 export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -340,4 +351,8 @@ export async function getAvailableTeams(leagueId: string, weekId: string): Promi
 
 export async function listWeekPicks(leagueId: string, weekId: string): Promise<MemberPickStatus[]> {
   return apiFetch<MemberPickStatus[]>(`/leagues/${leagueId}/weeks/${weekId}/picks`)
+}
+
+export async function getLeaderboard(leagueId: string): Promise<LeaderboardEntry[]> {
+  return apiFetch<LeaderboardEntry[]>(`/leagues/${leagueId}/leaderboard`)
 }

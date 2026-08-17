@@ -11,6 +11,7 @@ import { CreateLeagueScreen } from './screens/CreateLeagueScreen';
 import { JoinLeagueScreen } from './screens/JoinLeagueScreen';
 import { LeagueDetailScreen } from './screens/LeagueDetailScreen';
 import { PicksScreen } from './screens/PicksScreen';
+import { LeaderboardScreen } from './screens/LeaderboardScreen';
 
 const queryClient = new QueryClient();
 
@@ -26,7 +27,8 @@ type Screen =
   | { name: 'createLeague' }
   | { name: 'joinLeague' }
   | { name: 'leagueDetail'; leagueId: string }
-  | { name: 'picks'; leagueId: string };
+  | { name: 'picks'; leagueId: string }
+  | { name: 'leaderboard'; leagueId: string };
 
 function Root() {
   const { user, isLoading } = useAuth();
@@ -77,11 +79,19 @@ function Root() {
           leagueId={screen.leagueId}
           onBack={() => setScreen({ name: 'myLeagues' })}
           onNavigateToPicks={(leagueId) => setScreen({ name: 'picks', leagueId })}
+          onNavigateToLeaderboard={(leagueId) => setScreen({ name: 'leaderboard', leagueId })}
         />
       );
     case 'picks':
       return (
         <PicksScreen leagueId={screen.leagueId} onBack={() => setScreen({ name: 'leagueDetail', leagueId: screen.leagueId })} />
+      );
+    case 'leaderboard':
+      return (
+        <LeaderboardScreen
+          leagueId={screen.leagueId}
+          onBack={() => setScreen({ name: 'leagueDetail', leagueId: screen.leagueId })}
+        />
       );
     default:
       return (

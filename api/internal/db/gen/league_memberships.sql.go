@@ -51,6 +51,32 @@ func (q *Queries) CreateLeagueMembership(ctx context.Context, arg CreateLeagueMe
 	return i, err
 }
 
+const getLeagueMembershipByID = `-- name: GetLeagueMembershipByID :one
+SELECT id, league_id, user_id, role, is_contestant, status, eliminated_week_id, eliminated_game_id, bought_back, bought_back_at, bought_back_by, created_at, updated_at, removed_at FROM league_memberships WHERE id = $1
+`
+
+func (q *Queries) GetLeagueMembershipByID(ctx context.Context, id pgtype.UUID) (LeagueMembership, error) {
+	row := q.db.QueryRow(ctx, getLeagueMembershipByID, id)
+	var i LeagueMembership
+	err := row.Scan(
+		&i.ID,
+		&i.LeagueID,
+		&i.UserID,
+		&i.Role,
+		&i.IsContestant,
+		&i.Status,
+		&i.EliminatedWeekID,
+		&i.EliminatedGameID,
+		&i.BoughtBack,
+		&i.BoughtBackAt,
+		&i.BoughtBackBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.RemovedAt,
+	)
+	return i, err
+}
+
 const getMembershipByLeagueAndUser = `-- name: GetMembershipByLeagueAndUser :one
 SELECT id, league_id, user_id, role, is_contestant, status, eliminated_week_id, eliminated_game_id, bought_back, bought_back_at, bought_back_by, created_at, updated_at, removed_at FROM league_memberships
 WHERE league_id = $1 AND user_id = $2 AND removed_at IS NULL

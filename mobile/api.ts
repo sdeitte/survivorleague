@@ -128,6 +128,17 @@ export interface MemberPickStatus {
   team_id?: string;
 }
 
+// --- Leaderboard (Phase 5) ---
+
+export interface LeaderboardEntry {
+  membership_id: string;
+  display_name: string;
+  status: 'active' | 'eliminated';
+  is_contestant: boolean;
+  eliminated_week_id?: string;
+  bought_back: boolean;
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -323,4 +334,9 @@ export async function listWeekPicks(
 ): Promise<MemberPickStatus[]> {
   const res = await rawFetch(`/leagues/${leagueId}/weeks/${weekId}/picks`, { accessToken });
   return parseJsonOrThrow<MemberPickStatus[]>(res);
+}
+
+export async function getLeaderboard(accessToken: string, leagueId: string): Promise<LeaderboardEntry[]> {
+  const res = await rawFetch(`/leagues/${leagueId}/leaderboard`, { accessToken });
+  return parseJsonOrThrow<LeaderboardEntry[]>(res);
 }

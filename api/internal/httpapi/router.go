@@ -43,7 +43,7 @@ type API struct {
 
 // NewRouter builds the full chi router: middleware stack, CORS, and all
 // routes for this phase (health, auth, me, leagues/invites/conferences,
-// schedule reads, admin schedule sync, picks).
+// schedule reads, admin schedule sync, picks, leaderboard).
 func NewRouter(d Deps) http.Handler {
 	a := &API{
 		pool:            d.Pool,
@@ -95,6 +95,7 @@ func NewRouter(d Deps) http.Handler {
 		r.With(a.RequireLeagueMember).Get("/", a.handleGetLeague)
 		r.With(a.RequireCommissioner).Patch("/", a.handleUpdateLeague)
 		r.With(a.RequireLeagueMember).Get("/members", a.handleListMembers)
+		r.With(a.RequireLeagueMember).Get("/leaderboard", a.handleGetLeaderboard)
 		r.With(a.RequireCommissioner).Delete("/members/{membershipId}", a.handleRemoveMember)
 		r.With(a.RequireCommissioner).Get("/invite", a.handleGetInviteCode)
 		r.With(a.RequireCommissioner).Post("/invite/regenerate", a.handleRegenerateInviteCode)

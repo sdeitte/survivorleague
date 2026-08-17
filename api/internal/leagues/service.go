@@ -139,6 +139,22 @@ func (s *Service) GetActiveMembership(ctx context.Context, leagueID, userID pgty
 	return m, nil
 }
 
+// GetMembershipByID looks up a membership directly by its own id (not
+// scoped to a league/user pair), mapping "no rows" to
+// ErrMembershipNotFound. Used wherever a caller already has a membership
+// id in hand (e.g. tests inspecting a grading pipeline's elimination
+// side-effects) rather than a (league, user) pair.
+func (s *Service) GetMembershipByID(ctx context.Context, id pgtype.UUID) (gen.LeagueMembership, error) {
+	m, err := s.queries.GetLeagueMembershipByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return gen.LeagueMembership{}, ErrMembershipNotFound
+		}
+		return gen.LeagueMembership{}, err
+	}
+	return m, nil
+}
+
 // UpdateLeagueName updates a league's name. conference/season_year are
 // immutable and have no corresponding update method.
 func (s *Service) UpdateLeagueName(ctx context.Context, id pgtype.UUID, name string) (gen.League, error) {
@@ -159,6 +175,15 @@ func (s *Service) UpdateCommissionerIsContestant(ctx context.Context, membership
 // their display name, ordered by join date.
 func (s *Service) ListMembers(ctx context.Context, leagueID pgtype.UUID) ([]gen.ListActiveMembersWithUserRow, error) {
 	return s.queries.ListActiveMembersWithUser(ctx, leagueID)
+}
+
+// ListLeaderboard returns every non-removed member of a league in
+// standings order: active first, then eliminated members ordered by how
+// late they were eliminated (survived longer ranks higher). Backs
+// GET /leagues/:id/leaderboard — see ListLeaderboardForLeague's query
+// comment for the exact sort contract.
+func (s *Service) ListLeaderboard(ctx context.Context, leagueID pgtype.UUID) ([]gen.ListLeaderboardForLeagueRow, error) {
+	return s.queries.ListLeaderboardForLeague(ctx, leagueID)
 }
 
 // RemoveMember soft-deletes a membership (sets removed_at) scoped to the

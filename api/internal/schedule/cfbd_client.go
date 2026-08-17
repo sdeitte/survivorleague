@@ -129,3 +129,16 @@ func (c *CFBDClient) GetGames(ctx context.Context, year int) ([]cfbdGame, error)
 	}
 	return games, nil
 }
+
+// GetGamesForWeek fetches regular-season games for a single week via
+// GET /games?year=&week=&seasonType=regular — the narrow query the Phase 5
+// live poll loop uses to refresh just the in-progress week's games instead
+// of paying for a full SyncSeason call every ~90s.
+func (c *CFBDClient) GetGamesForWeek(ctx context.Context, year, week int) ([]cfbdGame, error) {
+	var games []cfbdGame
+	q := url.Values{"year": {fmt.Sprint(year)}, "week": {fmt.Sprint(week)}, "seasonType": {seasonTypeRegular}}
+	if err := c.get(ctx, "/games", q, &games); err != nil {
+		return nil, err
+	}
+	return games, nil
+}

@@ -206,6 +206,32 @@ func (a *API) handleListMembers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// handleGetLeaderboard implements GET /leagues/:id/leaderboard
+// (requireLeagueMember). See internal/leagues.Service.ListLeaderboard /
+// ListLeaderboardForLeague's query comment for the exact sort contract:
+// active members first, then eliminated members ordered by how late they
+// were eliminated (survived longer ranks higher).
+func (a *API) handleGetLeaderboard(w http.ResponseWriter, r *http.Request) {
+	lc, ok := LeagueFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusForbidden, "not a member of this league")
+		return
+	}
+
+	rows, err := a.leaguesService.ListLeaderboard(r.Context(), lc.League.ID)
+	if err != nil {
+		log.Printf("get leaderboard: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to load leaderboard")
+		return
+	}
+
+	out := make([]leaderboardEntryResponse, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, toLeaderboardEntryResponse(row))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // handleRemoveMember implements DELETE /leagues/:id/members/:membershipId.
 // Soft-deletes (sets removed_at) the target membership. Two rejection
 // cases, both drawn from the API contract: 403 if the commissioner targets

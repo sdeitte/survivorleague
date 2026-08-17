@@ -3,6 +3,9 @@ INSERT INTO league_memberships (league_id, user_id, role, is_contestant, status)
 VALUES (sqlc.arg(league_id), sqlc.arg(user_id), sqlc.arg(role), sqlc.arg(is_contestant), 'active')
 RETURNING *;
 
+-- name: GetLeagueMembershipByID :one
+SELECT * FROM league_memberships WHERE id = sqlc.arg(id);
+
 -- name: GetMembershipByLeagueAndUser :one
 -- Excludes removed members by design: this backs requireLeagueMember, where
 -- a removed_at row must behave exactly like "never joined" (403).

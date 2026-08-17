@@ -136,6 +136,29 @@ type memberResponse struct {
 	JoinedAt     string `json:"joined_at"`
 }
 
+// leaderboardEntryResponse is one row of GET /leagues/:id/leaderboard.
+// bought_back is always false for now — Phase 6 hasn't been built yet —
+// but the field is included from day one for forward compatibility.
+type leaderboardEntryResponse struct {
+	MembershipID     string `json:"membership_id"`
+	DisplayName      string `json:"display_name"`
+	Status           string `json:"status"`
+	IsContestant     bool   `json:"is_contestant"`
+	EliminatedWeekID string `json:"eliminated_week_id,omitempty"`
+	BoughtBack       bool   `json:"bought_back"`
+}
+
+func toLeaderboardEntryResponse(row gen.ListLeaderboardForLeagueRow) leaderboardEntryResponse {
+	return leaderboardEntryResponse{
+		MembershipID:     db.UUIDString(row.MembershipID),
+		DisplayName:      row.DisplayName,
+		Status:           row.Status,
+		IsContestant:     row.IsContestant,
+		EliminatedWeekID: pgUUIDStringOrEmpty(row.EliminatedWeekID),
+		BoughtBack:       row.BoughtBack,
+	}
+}
+
 type inviteCodeResponse struct {
 	InviteCode string `json:"invite_code"`
 }

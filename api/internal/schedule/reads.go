@@ -3,6 +3,7 @@ package schedule
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -63,4 +64,18 @@ func (s *Service) ListTeams(ctx context.Context, conference string) ([]gen.Team,
 		arg = pgtype.Text{String: conference, Valid: true}
 	}
 	return s.queries.ListTeams(ctx, arg)
+}
+
+// ListLiveWindowWeeks returns the distinct (season_year, week_number)
+// pairs among games currently inside the live poll window: kicked off
+// on-or-before now, but not so long ago that they've fallen out the far
+// end of the window (kickoff_at >= now - liveWindow), and not yet
+// status='final'. This is the Phase 5 live poll loop's cheap "is there
+// anything to even check" gate — an empty result means the loop makes no
+// CFBD call at all this tick.
+func (s *Service) ListLiveWindowWeeks(ctx context.Context, now time.Time, liveWindow time.Duration) ([]gen.ListLiveWindowWeeksRow, error) {
+	return s.queries.ListLiveWindowWeeks(ctx, gen.ListLiveWindowWeeksParams{
+		Now:         pgtype.Timestamptz{Time: now, Valid: true},
+		WindowStart: pgtype.Timestamptz{Time: now.Add(-liveWindow), Valid: true},
+	})
 }
