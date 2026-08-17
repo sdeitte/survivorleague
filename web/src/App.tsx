@@ -18,6 +18,7 @@ import { AdminUsersPage } from './routes/AdminUsersPage'
 import { AdminSyncRunsPage } from './routes/AdminSyncRunsPage'
 import { AdminResyncGamePage } from './routes/AdminResyncGamePage'
 import { AdminAuditLogPage } from './routes/AdminAuditLogPage'
+import { NotFoundPage } from './routes/NotFoundPage'
 
 function App() {
   return (
@@ -130,6 +131,7 @@ function App() {
             </SiteAdminRoute>
           }
         />
+        <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </AuthProvider>
   )

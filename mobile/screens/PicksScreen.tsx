@@ -252,6 +252,13 @@ export function PicksScreen({ leagueId, onBack }: { leagueId: string; onBack: ()
             <View style={styles.card}>
               <Text style={styles.sectionTitle}>League picks</Text>
               {weekPicksQuery.isLoading && <ActivityIndicator color="#f1f5f9" />}
+              {weekPicksQuery.error && (
+                <Text style={styles.error}>
+                  {weekPicksQuery.error instanceof ApiError
+                    ? weekPicksQuery.error.message
+                    : 'Could not load the league picks for this week.'}
+                </Text>
+              )}
               {weekPicksQuery.data?.map((status) => (
                 <View key={status.membership_id} style={styles.pickStatusRow}>
                   <Text style={styles.memberName}>{status.display_name}</Text>

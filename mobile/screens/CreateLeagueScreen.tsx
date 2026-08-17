@@ -18,7 +18,11 @@ export function CreateLeagueScreen({
   const { authFetch } = useAuth();
   const [serverError, setServerError] = useState<string | null>(null);
 
-  const { data: conferences, isLoading: conferencesLoading } = useQuery({
+  const {
+    data: conferences,
+    isLoading: conferencesLoading,
+    error: conferencesError,
+  } = useQuery({
     queryKey: ['conferences'],
     queryFn: api.listConferences,
   });
@@ -101,6 +105,13 @@ export function CreateLeagueScreen({
           )}
         />
         {errors.conference && <Text style={styles.error}>{errors.conference.message}</Text>}
+        {conferencesError && (
+          <Text style={styles.error}>
+            {conferencesError instanceof ApiError
+              ? conferencesError.message
+              : 'Could not load conferences. Try reloading the app.'}
+          </Text>
+        )}
       </View>
 
       {serverError && <Text style={styles.error}>{serverError}</Text>}

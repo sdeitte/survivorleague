@@ -10,7 +10,11 @@ export function CreateLeaguePage() {
   const navigate = useNavigate()
   const [serverError, setServerError] = useState<string | null>(null)
 
-  const { data: conferences, isLoading: conferencesLoading } = useQuery({
+  const {
+    data: conferences,
+    isLoading: conferencesLoading,
+    error: conferencesError,
+  } = useQuery({
     queryKey: ['conferences'],
     queryFn: listConferences,
   })
@@ -90,6 +94,13 @@ export function CreateLeaguePage() {
               ))}
             </select>
             {errors.conference && <p className="text-red-400 text-xs mt-1">{errors.conference.message}</p>}
+            {conferencesError && (
+              <p className="text-red-400 text-xs mt-1">
+                {conferencesError instanceof ApiError
+                  ? conferencesError.message
+                  : 'Could not load conferences. Try reloading the page.'}
+              </p>
+            )}
             <p className="text-xs text-slate-500 mt-1">Locked for the league's lifetime once created.</p>
           </div>
 

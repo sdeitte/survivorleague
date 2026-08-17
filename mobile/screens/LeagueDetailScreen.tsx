@@ -202,6 +202,12 @@ export function LeagueDetailScreen({
             {actionError && <Text style={styles.error}>{actionError}</Text>}
 
             <Text style={styles.sectionTitle}>Members</Text>
+            {membersQuery.isLoading && <ActivityIndicator color="#f1f5f9" />}
+            {membersQuery.error && (
+              <Text style={styles.error}>
+                {membersQuery.error instanceof ApiError ? membersQuery.error.message : 'Could not load members.'}
+              </Text>
+            )}
           </>
         }
         renderItem={({ item }) => (

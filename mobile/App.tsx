@@ -14,6 +14,7 @@ import { PicksScreen } from './screens/PicksScreen';
 import { LeaderboardScreen } from './screens/LeaderboardScreen';
 import { NotificationPreferencesScreen } from './screens/NotificationPreferencesScreen';
 import { AdminScreen } from './screens/AdminScreen';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 const queryClient = new QueryClient();
 
@@ -117,12 +118,14 @@ function Root() {
 
 export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <Root />
-        <StatusBar style="auto" />
-      </AuthProvider>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <Root />
+          <StatusBar style="auto" />
+        </AuthProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }
 

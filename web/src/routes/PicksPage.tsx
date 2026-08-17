@@ -283,6 +283,13 @@ export function PicksPage() {
               <section className="rounded-xl border border-slate-800 bg-slate-900 divide-y divide-slate-800">
                 <h2 className="p-4 text-sm font-medium text-slate-200">League picks</h2>
                 {weekPicksQuery.isLoading && <p className="p-4 text-sm text-slate-400">Loading…</p>}
+                {weekPicksQuery.error && (
+                  <p className="p-4 text-sm text-red-400">
+                    {weekPicksQuery.error instanceof ApiError
+                      ? weekPicksQuery.error.message
+                      : 'Could not load the league picks for this week.'}
+                  </p>
+                )}
                 {weekPicksQuery.data?.map((status) => (
                   <div key={status.membership_id} className="flex items-center justify-between p-4">
                     <p className="text-sm text-slate-100">{status.display_name}</p>

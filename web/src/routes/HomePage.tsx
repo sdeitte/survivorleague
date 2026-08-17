@@ -44,7 +44,7 @@ export function HomePage() {
           </Link>
         </div>
 
-        <div className="rounded-lg border border-slate-800 bg-slate-900 divide-y divide-slate-800">
+        <div className="rounded-xl border border-slate-800 bg-slate-900 divide-y divide-slate-800">
           {isLoading && <p className="p-4 text-sm text-slate-400">Loading your leagues…</p>}
           {error && (
             <p className="p-4 text-sm text-red-400">Could not load leagues: {(error as Error).message}</p>

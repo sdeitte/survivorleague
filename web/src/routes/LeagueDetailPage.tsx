@@ -213,6 +213,11 @@ export function LeagueDetailPage() {
         <div className="rounded-xl border border-slate-800 bg-slate-900 divide-y divide-slate-800">
           <h2 className="p-4 text-sm font-medium text-slate-200">Members</h2>
           {membersQuery.isLoading && <p className="p-4 text-sm text-slate-400">Loading members…</p>}
+          {membersQuery.error && (
+            <p className="p-4 text-sm text-red-400">
+              {membersQuery.error instanceof ApiError ? membersQuery.error.message : 'Could not load members.'}
+            </p>
+          )}
           {membersQuery.data?.map((member) => (
             <div key={member.membership_id} className="flex items-center justify-between p-4">
               <div>
