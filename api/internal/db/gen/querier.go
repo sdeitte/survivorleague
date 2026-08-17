@@ -21,6 +21,22 @@ type Querier interface {
 	// left untouched: they remain the historical record of the elimination
 	// that was bought back, not cleared.
 	BuyBackMembership(ctx context.Context, arg BuyBackMembershipParams) (LeagueMembership, error)
+	// The dispatcher's claim step: FOR UPDATE SKIP LOCKED is what guarantees a
+	// row is only ever claimed by one concurrent dispatcher process/tick at a
+	// time — a second caller racing this same query simply skips any row the
+	// first has already locked rather than blocking or double-claiming it.
+	// Held for the lifetime of the caller's transaction (see
+	// notify.Service.DispatchBatch), which also covers the actual
+	// push/email send attempts — acceptable at this scale (a handful of
+	// notifications per tick), and specifically what makes a mid-dispatch
+	// crash safe: an aborted transaction leaves every claimed row exactly as
+	// it was (still 'pending'), so the next tick just retries it, rather than
+	// leaving rows stranded in some intermediate "claimed but never finished"
+	// state.
+	ClaimPendingNotifications(ctx context.Context, limitCount int32) ([]NotificationOutbox, error)
+	// Test/verification helper — lets integration tests assert "N rows
+	// enqueued" without reaching for raw SQL.
+	CountPendingNotifications(ctx context.Context) (int64, error)
 	// Every commissioner/admin privileged action writes a row here per the
 	// plan's Data Model section. league_id/target_type/target_id are nullable
 	// (e.g. a schedule_sync action has no league scope).
@@ -37,9 +53,18 @@ type Querier interface {
 	// was clearly designed for exactly this kind of run metadata.
 	CreateSyncRun(ctx context.Context, arg CreateSyncRunParams) (SyncRun, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	DeleteDeviceToken(ctx context.Context, arg DeleteDeviceTokenParams) error
 	// game_id may be a NULL narg (the missed-pick case — nothing to point
 	// eliminated_game_id at).
 	EliminateMembership(ctx context.Context, arg EliminateMembershipParams) (LeagueMembership, error)
+	// Phase 7: the notification_outbox queue and its dispatcher. See
+	// internal/notify's package doc comment for the full design.
+	// ON CONFLICT (dedupe_key) DO NOTHING is the single-shot-per-event
+	// guarantee: every trigger site in internal/notify calls this
+	// unconditionally (self-heal re-grading, a re-fired cron tick, ...) and
+	// relies on this to make repeat calls no-ops. Mapped by the caller to "no
+	// rows returned = already enqueued", not an error.
+	EnqueueNotification(ctx context.Context, arg EnqueueNotificationParams) (NotificationOutbox, error)
 	FinishSyncRun(ctx context.Context, arg FinishSyncRunParams) (SyncRun, error)
 	// Active = not revoked and not expired. Callers should treat "no rows" as
 	// "invalid or already-used token" without distinguishing why, to avoid
@@ -70,6 +95,27 @@ type Querier interface {
 	// Excludes removed members by design: this backs requireLeagueMember, where
 	// a removed_at row must behave exactly like "never joined" (403).
 	GetMembershipByLeagueAndUser(ctx context.Context, arg GetMembershipByLeagueAndUserParams) (LeagueMembership, error)
+	// The membership's very next deadline: the soonest-kicking-off,
+	// conference-relevant game whose week the membership has not yet
+	// submitted any pick for. This is the "current week"/"nearest not-yet-
+	// locked game" the plan's pick_reminder trigger reminds against — a
+	// membership that has already picked for every upcoming week's earliest
+	// game gets pgx.ErrNoRows here (mapped by the caller to "nothing to
+	// remind, skip").
+	GetNearestUnpickedGameForMembership(ctx context.Context, arg GetNearestUnpickedGameForMembershipParams) (GetNearestUnpickedGameForMembershipRow, error)
+	// Phase 7: per-user notification preferences backing
+	// GET/PUT /me/notification-preferences, and read by the dispatcher before
+	// sending each outbox row.
+	// Upsert-or-get in one statement: a brand-new user has no
+	// notification_preferences row yet (nothing creates one at registration
+	// time), so the first ever access — either the GET endpoint or the
+	// dispatcher checking a preference before sending — lazily creates it with
+	// the table's column defaults (see 00001_init.sql: every type is on by
+	// default, matching the plan's "opt-out" framing for `survived` — on by
+	// default, but the user can disable it). The `DO UPDATE SET user_id =
+	// EXCLUDED.user_id` is a deliberate no-op update purely so RETURNING
+	// always yields a row on conflict too, not just on insert.
+	GetOrCreateNotificationPreferences(ctx context.Context, userID pgtype.UUID) (NotificationPreference, error)
 	// Backs GET .../picks/me. A no-rows result (pgx.ErrNoRows) means the
 	// membership has not picked for this week yet — mapped by the service to
 	// ErrPickNotFound.
@@ -111,6 +157,14 @@ type Querier interface {
 	// status='active' (not already eliminated), is_contestant=true (a
 	// manage-only commissioner never plays), removed_at IS NULL.
 	ListActiveContestantMembershipsForLeague(ctx context.Context, leagueID pgtype.UUID) ([]LeagueMembership, error)
+	// Phase 7: the hourly pick_reminder scan. See internal/notify/reminder.go
+	// for the full design.
+	// Every membership the reminder scan needs to consider: an active,
+	// playing (is_contestant=true), non-removed member of an active league.
+	// Carries the league's conference/season_year alongside so the caller can
+	// feed them straight into GetNearestUnpickedGameForMembership without a
+	// second lookup per row.
+	ListActiveContestantMembershipsForReminderScan(ctx context.Context) ([]ListActiveContestantMembershipsForReminderScanRow, error)
 	ListActiveMembersWithUser(ctx context.Context, leagueID pgtype.UUID) ([]ListActiveMembersWithUserRow, error)
 	// Every team in the league's conference that has a game in the given week,
 	// with its opponent, game id, and kickoff time inline so the picks screen
@@ -122,6 +176,7 @@ type Querier interface {
 	// conference — the set TryFinalizeLeagueWeek must fully resolve (no
 	// postponed/canceled, all final) before a league's week can finalize.
 	ListConferenceRelevantGamesForWeek(ctx context.Context, arg ListConferenceRelevantGamesForWeekParams) ([]Game, error)
+	ListDeviceTokensForUser(ctx context.Context, userID pgtype.UUID) ([]DeviceToken, error)
 	// Joined with both teams' name/conference/logo so clients don't need N+1
 	// lookups per the GET /weeks/:id/games contract.
 	ListGamesByWeekWithTeams(ctx context.Context, weekID pgtype.UUID) ([]ListGamesByWeekWithTeamsRow, error)
@@ -159,6 +214,9 @@ type Querier interface {
 	// poll loop's cheap "is there anything to even check" gate — a
 	// zero-row result means no CFBD call is made this tick at all.
 	ListLiveWindowWeeks(ctx context.Context, arg ListLiveWindowWeeksParams) ([]ListLiveWindowWeeksRow, error)
+	// Test/verification + potential future admin-debugging helper: every
+	// outbox row for a user, newest first.
+	ListNotificationOutboxForUser(ctx context.Context, userID pgtype.UUID) ([]NotificationOutbox, error)
 	// Every non-removed member of the league with their pick status for the
 	// given week (LEFT JOINed — members with no pick yet still appear, with
 	// null pick/game/team/kickoff columns). Backs GET .../picks; the service
@@ -179,6 +237,17 @@ type Querier interface {
 	// defensive redundancy on top of the FOR UPDATE row lock above — belt and
 	// suspenders against ever re-grading a game.
 	MarkGameGraded(ctx context.Context, id pgtype.UUID) error
+	// Increments attempts and, once sqlc.arg(max_attempts) is reached, moves
+	// the row to the terminal 'failed' status; otherwise leaves it 'pending'
+	// so the next dispatcher tick retries it. Bounded-retry counterpart to
+	// MarkNotificationSent/MarkNotificationSkipped's single-shot outcomes.
+	MarkNotificationFailedOrRetry(ctx context.Context, arg MarkNotificationFailedOrRetryParams) (NotificationOutbox, error)
+	MarkNotificationSent(ctx context.Context, id pgtype.UUID) error
+	// Terminal, non-retried outcome for an opted-out preference or "nothing to
+	// deliver to" (e.g. a push row for a user with zero registered device
+	// tokens) — see internal/notify's dispatch doc comment for why this is
+	// deliberately distinct from 'failed'.
+	MarkNotificationSkipped(ctx context.Context, id pgtype.UUID) error
 	// Soft-delete: only affects a currently-active (non-removed) row scoped to
 	// the given league, so this doubles as the "membership belongs to this
 	// league and isn't already removed" check — no rows back means 404/400 to
@@ -190,6 +259,13 @@ type Querier interface {
 	UpdateLeagueInviteCode(ctx context.Context, arg UpdateLeagueInviteCodeParams) (League, error)
 	UpdateLeagueName(ctx context.Context, arg UpdateLeagueNameParams) (League, error)
 	UpdateUserDisplayName(ctx context.Context, arg UpdateUserDisplayNameParams) (User, error)
+	// Phase 7: device token registration backing POST/DELETE /me/device-tokens.
+	// token itself is globally UNIQUE (not a composite (user_id, token) key —
+	// see device_tokens' definition in 00001_init.sql), so re-registering the
+	// same Expo push token reassigns it to whichever user_id/platform is
+	// registering now (covers a token surviving a logout/login as a different
+	// account on a shared device) rather than erroring.
+	UpsertDeviceToken(ctx context.Context, arg UpsertDeviceTokenParams) (DeviceToken, error)
 	// Match/upsert on external_id (CFBD's game id) per the Phase 3 sync
 	// contract. graded_at is deliberately excluded from the UPDATE SET list —
 	// it's a Phase 5 grading-pipeline idempotency guard this sync must never
@@ -209,6 +285,16 @@ type Querier interface {
 	//     treat "no rows" as "already a member" (409) — this also protects a
 	//     commissioner's own membership from ever being reset by this query.
 	UpsertLeagueMembershipOnJoin(ctx context.Context, arg UpsertLeagueMembershipOnJoinParams) (LeagueMembership, error)
+	// Writes the audit/dedupe record once a row's outcome is known (mirrors
+	// the outbox row's own dedupe_key 1:1, so this is always exactly one log
+	// row per outbox row). ON CONFLICT DO UPDATE (rather than DO NOTHING)
+	// because a retried row calls this again with a new status each attempt.
+	UpsertNotificationLog(ctx context.Context, arg UpsertNotificationLogParams) error
+	// PUT /me/notification-preferences is a full-replace upsert (not a
+	// partial patch): a caller who has never had a preferences row yet (see
+	// GetOrCreateNotificationPreferences above) can still PUT straight away
+	// without a prior GET.
+	UpsertNotificationPreferences(ctx context.Context, arg UpsertNotificationPreferencesParams) (NotificationPreference, error)
 	// Create-or-update a membership's pick for a week. ON CONFLICT targets the
 	// UNIQUE(league_membership_id, week_id) constraint — this is what makes
 	// "changing your mind" an UPDATE of the same row (not a second row), which

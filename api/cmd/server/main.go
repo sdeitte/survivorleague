@@ -9,11 +9,15 @@
 // daily cron job that keeps the schedule in sync automatically — additive
 // to the manual admin endpoint, not a replacement. Phase 5 adds the
 // grading/elimination pipeline (internal/grading) and the adaptive live
-// poll loop (internal/livepoll) that drives it. Route wiring lives in
+// poll loop (internal/livepoll) that drives it. Phase 6 adds the
+// commissioner buy-back endpoint. Phase 7 adds notifications
+// (internal/notify): device tokens/preferences, the notification_outbox
+// dispatcher ticker, and the hourly pick_reminder cron job, wired
+// alongside the existing cron/poll-loop pattern. Route wiring lives in
 // internal/httpapi; this file just reads configuration from the
 // environment, assembles dependencies, and owns process lifecycle (HTTP
-// server + cron scheduler + live poll loop, all stopped cleanly on
-// shutdown).
+// server + cron scheduler + live poll loop + notification dispatcher, all
+// stopped cleanly on shutdown).
 package main
 
 import (
@@ -36,6 +40,7 @@ import (
 	"github.com/sdeitte/survivor-league-api/internal/httpapi"
 	"github.com/sdeitte/survivor-league-api/internal/leagues"
 	"github.com/sdeitte/survivor-league-api/internal/livepoll"
+	"github.com/sdeitte/survivor-league-api/internal/notify"
 	"github.com/sdeitte/survivor-league-api/internal/picks"
 	"github.com/sdeitte/survivor-league-api/internal/schedule"
 )
@@ -78,6 +83,25 @@ func main() {
 		log.Print("warning: CFBD_API_KEY is not set — schedule sync calls to the real CFBD API will fail with 401 until a key is configured")
 	}
 
+	// EXPO_PUSH_BASE_URL/RESEND_BASE_URL are configurable for the same
+	// reason CFBD_BASE_URL is above — pointed at a mock HTTP server for
+	// local/E2E testing. RESEND_API_KEY has no real value in this
+	// environment yet, same "flagged but unavailable" treatment as
+	// CFBD_API_KEY: sends will fail (logged, retried up to the attempt
+	// cap, then marked permanently failed) until a real key is
+	// configured. EXPO_ACCESS_TOKEN is Expo's optional "enhanced
+	// security" feature — push delivery itself needs no token, so an
+	// empty value is a normal, fully-functional configuration, not a
+	// degraded one like the CFBD/Resend keys.
+	expoPushBaseURL := getenv("EXPO_PUSH_BASE_URL", notify.DefaultExpoPushURL)
+	expoAccessToken := os.Getenv("EXPO_ACCESS_TOKEN")
+	resendBaseURL := getenv("RESEND_BASE_URL", notify.DefaultResendURL)
+	resendAPIKey := os.Getenv("RESEND_API_KEY")
+	resendFromEmail := getenv("RESEND_FROM_EMAIL", "Survivor League <notifications@survivor-league.example>")
+	if resendAPIKey == "" {
+		log.Print("warning: RESEND_API_KEY is not set — email notifications will fail until a key is configured")
+	}
+
 	// Both are required from Phase 1 onward: every route except /health
 	// needs a database, and no token can be issued/verified without a
 	// signing secret. Fail fast rather than booting into a half-broken state.
@@ -102,12 +126,24 @@ func main() {
 	jwtIssuer := auth.NewJWTIssuer(jwtSecret)
 	queries := gen.New(pool)
 	authService := auth.NewService(queries, jwtIssuer, adminEmail)
-	leaguesService := leagues.NewService(queries, pool)
 	cfbdClient := schedule.NewCFBDClient(http.DefaultClient, cfbdBaseURL, cfbdAPIKey)
 	scheduleService := schedule.NewService(queries, cfbdClient)
 	adminService := admin.NewService(queries, scheduleService)
 	picksService := picks.NewService(queries, pool)
-	gradingService := grading.NewService(queries, pool)
+
+	// --- Notifications (Phase 7) ---
+	//
+	// Constructed before leaguesService/gradingService since both take a
+	// notify.Service as their Notifier (see internal/leagues.WithNotifier,
+	// internal/grading.WithNotifier) — the trigger sites for eliminated/
+	// survived/mass_wipeout/buyback notifications, called directly from
+	// the real grading/buy-back pipelines, not a parallel/duplicate check.
+	pushSender := notify.NewExpoPushSender(http.DefaultClient, expoPushBaseURL, expoAccessToken)
+	emailSender := notify.NewResendEmailSender(http.DefaultClient, resendBaseURL, resendAPIKey, resendFromEmail)
+	notifyService := notify.NewService(queries, pool, pushSender, emailSender)
+
+	leaguesService := leagues.NewService(queries, pool, leagues.WithNotifier(notifyService))
+	gradingService := grading.NewService(queries, pool, grading.WithNotifier(notifyService))
 
 	router := httpapi.NewRouter(httpapi.Deps{
 		Pool:              pool,
@@ -116,6 +152,7 @@ func main() {
 		ScheduleService:   scheduleService,
 		AdminService:      adminService,
 		PicksService:      picksService,
+		NotifyService:     notifyService,
 		JWT:               jwtIssuer,
 		AppEnv:            appEnv,
 		CORSAllowedOrigin: corsAllowedOrigin,
@@ -153,6 +190,25 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to schedule cron job: %v", err)
 	}
+
+	// --- Hourly pick_reminder scan (Phase 7) ---
+	//
+	// Added to the same cron scheduler as the daily schedule sync above,
+	// per the plan's "Hourly reminder scan for members without a pick
+	// inside ~24h/~3h of their nearest lock". See
+	// internal/notify.Service.ScanPickReminders for the full design —
+	// dedupe keys (not this cron's own state) are what make firing every
+	// hour safe.
+	_, err = cronScheduler.AddFunc("0 * * * *", func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		if err := notifyService.ScanPickReminders(ctx); err != nil {
+			log.Printf("cron pick_reminder scan failed: %v", err)
+		}
+	})
+	if err != nil {
+		log.Fatalf("failed to schedule pick_reminder cron job: %v", err)
+	}
 	cronScheduler.Start()
 
 	// --- Live poll loop (Phase 5) ---
@@ -164,6 +220,14 @@ func main() {
 	// internal/livepoll's package doc comment for the full design.
 	poller := livepoll.NewPoller(scheduleService, gradingService)
 	poller.Start(context.Background())
+
+	// --- Notification dispatcher (Phase 7) ---
+	//
+	// A separate background ticker (every 20s by default) that drains
+	// notification_outbox — see internal/notify's package doc comment for
+	// the full design.
+	dispatcher := notify.NewDispatcher(notifyService)
+	dispatcher.Start(context.Background())
 
 	server := &http.Server{
 		Addr:    ":" + port,
@@ -190,7 +254,8 @@ func main() {
 		log.Print("timed out waiting for in-flight cron jobs to finish")
 	}
 
-	poller.Stop() // blocks until any in-flight tick finishes
+	poller.Stop()     // blocks until any in-flight tick finishes
+	dispatcher.Stop() // blocks until any in-flight dispatch batch finishes
 
 	httpShutdownCtx, cancelHTTPShutdown := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancelHTTPShutdown()

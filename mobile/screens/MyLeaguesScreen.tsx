@@ -13,11 +13,13 @@ export function MyLeaguesScreen({
   onNavigateToJoin,
   onNavigateToLeague,
   onNavigateToHealth,
+  onNavigateToNotificationPreferences,
 }: {
   onNavigateToCreate: () => void;
   onNavigateToJoin: () => void;
   onNavigateToLeague: (leagueId: string) => void;
   onNavigateToHealth: () => void;
+  onNavigateToNotificationPreferences: () => void;
 }) {
   const { user, logout, authFetch } = useAuth();
 
@@ -82,6 +84,9 @@ export function MyLeaguesScreen({
         )}
       />
 
+      <Pressable onPress={onNavigateToNotificationPreferences}>
+        <Text style={styles.link}>Notification preferences</Text>
+      </Pressable>
       <Pressable onPress={onNavigateToHealth}>
         <Text style={styles.link}>API health check</Text>
       </Pressable>

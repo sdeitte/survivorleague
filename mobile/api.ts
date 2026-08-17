@@ -157,6 +157,24 @@ export interface LeaderboardEntry {
   bought_back: boolean;
 }
 
+// --- Notifications (Phase 7) ---
+
+export interface DeviceToken {
+  id: string;
+  platform: 'ios' | 'android';
+  created_at: string;
+}
+
+export interface NotificationPreferences {
+  pick_reminder: boolean;
+  eliminated: boolean;
+  survived: boolean;
+  mass_wipeout: boolean;
+  buyback: boolean;
+  email_enabled: boolean;
+  push_enabled: boolean;
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -362,4 +380,36 @@ export async function listWeekPicks(
 export async function getLeaderboard(accessToken: string, leagueId: string): Promise<LeaderboardEntry[]> {
   const res = await rawFetch(`/leagues/${leagueId}/leaderboard`, { accessToken });
   return parseJsonOrThrow<LeaderboardEntry[]>(res);
+}
+
+// --- Notifications (Phase 7) ---
+
+export async function registerDeviceToken(
+  accessToken: string,
+  input: { platform: 'ios' | 'android'; expo_push_token: string },
+): Promise<DeviceToken> {
+  const res = await rawFetch('/me/device-tokens', { method: 'POST', body: input, accessToken });
+  return parseJsonOrThrow<DeviceToken>(res);
+}
+
+export async function deleteDeviceToken(accessToken: string, expoPushToken: string): Promise<void> {
+  const res = await rawFetch('/me/device-tokens', {
+    method: 'DELETE',
+    body: { expo_push_token: expoPushToken },
+    accessToken,
+  });
+  await parseJsonOrThrow<void>(res);
+}
+
+export async function getNotificationPreferences(accessToken: string): Promise<NotificationPreferences> {
+  const res = await rawFetch('/me/notification-preferences', { accessToken });
+  return parseJsonOrThrow<NotificationPreferences>(res);
+}
+
+export async function updateNotificationPreferences(
+  accessToken: string,
+  prefs: NotificationPreferences,
+): Promise<NotificationPreferences> {
+  const res = await rawFetch('/me/notification-preferences', { method: 'PUT', body: prefs, accessToken });
+  return parseJsonOrThrow<NotificationPreferences>(res);
 }

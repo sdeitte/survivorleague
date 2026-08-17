@@ -93,6 +93,21 @@ type LeagueWeekResult struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type NotificationOutbox struct {
+	ID        pgtype.UUID        `json:"id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	LeagueID  pgtype.UUID        `json:"league_id"`
+	WeekID    pgtype.UUID        `json:"week_id"`
+	Type      string             `json:"type"`
+	Channel   string             `json:"channel"`
+	Payload   []byte             `json:"payload"`
+	DedupeKey string             `json:"dedupe_key"`
+	Status    string             `json:"status"`
+	Attempts  int32              `json:"attempts"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	SentAt    pgtype.Timestamptz `json:"sent_at"`
+}
+
 type NotificationPreference struct {
 	ID           pgtype.UUID        `json:"id"`
 	UserID       pgtype.UUID        `json:"user_id"`

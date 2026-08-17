@@ -80,9 +80,14 @@ export function HomePage() {
           ))}
         </div>
 
-        <Link to="/health" className="text-xs text-slate-500 underline">
-          API health check
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link to="/notification-preferences" className="text-xs text-slate-500 underline">
+            Notification preferences
+          </Link>
+          <Link to="/health" className="text-xs text-slate-500 underline">
+            API health check
+          </Link>
+        </div>
       </div>
     </main>
   )

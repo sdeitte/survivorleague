@@ -12,6 +12,7 @@ import { JoinLeagueScreen } from './screens/JoinLeagueScreen';
 import { LeagueDetailScreen } from './screens/LeagueDetailScreen';
 import { PicksScreen } from './screens/PicksScreen';
 import { LeaderboardScreen } from './screens/LeaderboardScreen';
+import { NotificationPreferencesScreen } from './screens/NotificationPreferencesScreen';
 
 const queryClient = new QueryClient();
 
@@ -28,7 +29,8 @@ type Screen =
   | { name: 'joinLeague' }
   | { name: 'leagueDetail'; leagueId: string }
   | { name: 'picks'; leagueId: string }
-  | { name: 'leaderboard'; leagueId: string };
+  | { name: 'leaderboard'; leagueId: string }
+  | { name: 'notificationPreferences' };
 
 function Root() {
   const { user, isLoading } = useAuth();
@@ -59,6 +61,8 @@ function Root() {
   switch (screen.name) {
     case 'health':
       return <HealthScreen onBack={() => setScreen({ name: 'myLeagues' })} />;
+    case 'notificationPreferences':
+      return <NotificationPreferencesScreen onBack={() => setScreen({ name: 'myLeagues' })} />;
     case 'createLeague':
       return (
         <CreateLeagueScreen
@@ -100,6 +104,7 @@ function Root() {
           onNavigateToJoin={() => setScreen({ name: 'joinLeague' })}
           onNavigateToLeague={(leagueId) => setScreen({ name: 'leagueDetail', leagueId })}
           onNavigateToHealth={() => setScreen({ name: 'health' })}
+          onNavigateToNotificationPreferences={() => setScreen({ name: 'notificationPreferences' })}
         />
       );
   }

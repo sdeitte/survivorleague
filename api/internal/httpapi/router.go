@@ -12,6 +12,7 @@ import (
 	"github.com/sdeitte/survivor-league-api/internal/admin"
 	"github.com/sdeitte/survivor-league-api/internal/auth"
 	"github.com/sdeitte/survivor-league-api/internal/leagues"
+	"github.com/sdeitte/survivor-league-api/internal/notify"
 	"github.com/sdeitte/survivor-league-api/internal/picks"
 	"github.com/sdeitte/survivor-league-api/internal/schedule"
 )
@@ -24,6 +25,7 @@ type Deps struct {
 	ScheduleService   *schedule.Service
 	AdminService      *admin.Service
 	PicksService      *picks.Service
+	NotifyService     *notify.Service
 	JWT               *auth.JWTIssuer
 	AppEnv            string // "development" | "production" — gates cookie Secure flag
 	CORSAllowedOrigin string
@@ -37,13 +39,15 @@ type API struct {
 	scheduleService *schedule.Service
 	adminService    *admin.Service
 	picksService    *picks.Service
+	notifyService   *notify.Service
 	jwt             *auth.JWTIssuer
 	appEnv          string
 }
 
 // NewRouter builds the full chi router: middleware stack, CORS, and all
 // routes for this phase (health, auth, me, leagues/invites/conferences,
-// schedule reads, admin schedule sync, picks, leaderboard, buy-back).
+// schedule reads, admin schedule sync, picks, leaderboard, buy-back,
+// device tokens/notification preferences).
 func NewRouter(d Deps) http.Handler {
 	a := &API{
 		pool:            d.Pool,
@@ -52,6 +56,7 @@ func NewRouter(d Deps) http.Handler {
 		scheduleService: d.ScheduleService,
 		adminService:    d.AdminService,
 		picksService:    d.PicksService,
+		notifyService:   d.NotifyService,
 		jwt:             d.JWT,
 		appEnv:          d.AppEnv,
 	}
@@ -85,6 +90,10 @@ func NewRouter(d Deps) http.Handler {
 
 	r.With(a.RequireAuth).Get("/me", a.handleGetMe)
 	r.With(a.RequireAuth).Patch("/me", a.handleUpdateMe)
+	r.With(a.RequireAuth).Post("/me/device-tokens", a.handleRegisterDeviceToken)
+	r.With(a.RequireAuth).Delete("/me/device-tokens", a.handleDeleteDeviceToken)
+	r.With(a.RequireAuth).Get("/me/notification-preferences", a.handleGetNotificationPreferences)
+	r.With(a.RequireAuth).Put("/me/notification-preferences", a.handleUpdateNotificationPreferences)
 
 	r.Get("/conferences", a.handleListConferences)
 

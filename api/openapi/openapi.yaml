@@ -17,10 +17,15 @@ info:
     and the live poll loop that drives it are internal (internal/grading,
     internal/livepoll), not client-facing API surface. Phase 6 adds the
     commissioner buy-back endpoint (one-time-ever reinstatement of an
-    eliminated member). Admin views and the rest of site-admin are added
+    eliminated member). Phase 7 adds notifications: device-token
+    registration and notification preferences (the notification_outbox
+    dispatcher, Expo Push/Resend delivery, and the five trigger types —
+    pick_reminder, eliminated, survived, mass_wipeout, buyback — are
+    internal, internal/notify, not client-facing API surface beyond these
+    two resources). Admin views and the rest of site-admin are added
     incrementally in later phases per the roadmap — see
     /Users/sdeitte/.claude/plans/witty-questing-barto.md.
-  version: 0.6.0
+  version: 0.7.0
 servers:
   - url: http://localhost:8080
     description: Local development
@@ -253,6 +258,137 @@ paths:
                 $ref: "#/components/schemas/User"
         "400":
           description: Missing display_name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing, invalid, or expired access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /me/device-tokens:
+    post:
+      operationId: registerDeviceToken
+      summary: Register (or re-register) an Expo push token for the current user
+      description: >
+        Upserts on the token itself (device_tokens.token is globally
+        UNIQUE, not per-user) — re-registering a token already on file
+        reassigns it to the caller and refreshes platform/last_used_at
+        rather than erroring. Called by the mobile app after obtaining an
+        Expo push token via expo-notifications (web has no push
+        capability per the plan's stack — Expo Push is mobile-only).
+      tags:
+        - Users
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterDeviceTokenRequest"
+      responses:
+        "200":
+          description: The upserted device token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceToken"
+        "400":
+          description: Missing/invalid expo_push_token or platform
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing, invalid, or expired access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteDeviceToken
+      summary: Remove a device token (e.g. on logout/uninstall)
+      description: >
+        Idempotent: removing a token that doesn't exist (or belongs to a
+        different user) is still a 204, not a 404.
+      tags:
+        - Users
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeleteDeviceTokenRequest"
+      responses:
+        "204":
+          description: Token removed (or was already absent)
+        "400":
+          description: Missing expo_push_token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing, invalid, or expired access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /me/notification-preferences:
+    get:
+      operationId: getNotificationPreferences
+      summary: Get the current user's notification preferences
+      description: >
+        Lazily creates a default row (every type on, per the schema's
+        column defaults) on first access — a brand-new user with no prior
+        PUT still gets sensible defaults back rather than a 404. `survived`
+        is the plan's one opt-out-by-default-ON type (push-only,
+        defaults true, the user may disable it); every other type also
+        defaults true but is not singled out as opt-out framing in the
+        plan — the schema/behavior is identical either way (a boolean the
+        user can flip), this description just reflects the plan's own
+        framing for `survived`.
+      tags:
+        - Users
+      responses:
+        "200":
+          description: The current user's notification preferences
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationPreferences"
+        "401":
+          description: Missing, invalid, or expired access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: updateNotificationPreferences
+      summary: Replace the current user's notification preferences
+      description: >
+        A full-replace upsert — all seven fields are required in the body,
+        matching the response shape of GET on this same resource.
+      tags:
+        - Users
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationPreferences"
+      responses:
+        "200":
+          description: The updated notification preferences
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationPreferences"
+        "400":
+          description: Invalid request body
           content:
             application/json:
               schema:
@@ -1286,6 +1422,75 @@ components:
         display_name:
           type: string
         is_site_admin:
+          type: boolean
+
+    RegisterDeviceTokenRequest:
+      type: object
+      required:
+        - platform
+        - expo_push_token
+      properties:
+        platform:
+          type: string
+          enum: [ios, android]
+        expo_push_token:
+          type: string
+
+    DeleteDeviceTokenRequest:
+      type: object
+      required:
+        - expo_push_token
+      properties:
+        expo_push_token:
+          type: string
+
+    DeviceToken:
+      type: object
+      required:
+        - id
+        - platform
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        platform:
+          type: string
+          enum: [ios, android]
+        created_at:
+          type: string
+          format: date-time
+
+    NotificationPreferences:
+      type: object
+      description: >
+        One boolean per trigger type plus one per delivery channel. All
+        default true (see notification_preferences' column defaults in
+        migrations/00001_init.sql) — every type is effectively opt-out,
+        `survived` (push-only) is simply the one the plan calls out by
+        name as opt-out framing.
+      required:
+        - pick_reminder
+        - eliminated
+        - survived
+        - mass_wipeout
+        - buyback
+        - email_enabled
+        - push_enabled
+      properties:
+        pick_reminder:
+          type: boolean
+        eliminated:
+          type: boolean
+        survived:
+          type: boolean
+        mass_wipeout:
+          type: boolean
+        buyback:
+          type: boolean
+        email_enabled:
+          type: boolean
+        push_enabled:
           type: boolean
 
     SessionResponse:

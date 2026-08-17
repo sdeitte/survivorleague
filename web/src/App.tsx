@@ -10,6 +10,7 @@ import { JoinLeaguePage } from './routes/JoinLeaguePage'
 import { LeagueDetailPage } from './routes/LeagueDetailPage'
 import { PicksPage } from './routes/PicksPage'
 import { LeaderboardPage } from './routes/LeaderboardPage'
+import { NotificationPreferencesPage } from './routes/NotificationPreferencesPage'
 
 function App() {
   return (
@@ -63,6 +64,14 @@ function App() {
           element={
             <ProtectedRoute>
               <LeaderboardPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/notification-preferences"
+          element={
+            <ProtectedRoute>
+              <NotificationPreferencesPage />
             </ProtectedRoute>
           }
         />

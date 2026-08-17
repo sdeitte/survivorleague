@@ -34,6 +34,11 @@ See the full plan: `/Users/sdeitte/.claude/plans/witty-questing-barto.md`.
 | `PORT`                 | no       | `8080`                   | HTTP port the server listens on |
 | `CFBD_API_KEY`         | no*      | unset                    | Bearer token for CollegeFootballData.com. *Required for a real schedule sync to succeed — without it, `POST /admin/sync/schedule` and the daily cron job still run and record a `sync_runs` row, but the CFBD call itself fails with 401. No live key exists in this repo/environment yet (the old hardcoded key was rotated/abandoned, not carried forward) — see api/internal/schedule's doc comments. |
 | `CFBD_BASE_URL`        | no       | `https://api.collegefootballdata.com` | Override to point the server at a mock CFBD server (e.g. for local E2E testing without a real API key). |
+| `RESEND_API_KEY`       | no*      | unset                    | Bearer token for Resend (transactional email). *Required for real email notifications to succeed — without it, notification_outbox email rows still get claimed/attempted by the dispatcher, they just fail (retried up to the attempt cap, then marked permanently `failed`; push notifications are unaffected). No live key exists in this repo/environment yet — same treatment as `CFBD_API_KEY`. See api/internal/notify's doc comments. |
+| `RESEND_FROM_EMAIL`    | no       | `Survivor League <notifications@survivor-league.example>` | Sender address for outgoing email. Resend requires sending from a domain verified on the account. |
+| `RESEND_BASE_URL`      | no       | `https://api.resend.com/emails` | Override to point the server at a mock Resend server (e.g. for local E2E testing without a real API key). |
+| `EXPO_PUSH_BASE_URL`   | no       | `https://exp.host/--/api/v2/push/send` | Override to point the server at a mock Expo Push server (e.g. for local E2E testing). Unlike Resend, no key is required for real Expo push delivery, so this one has no "unavailable in this environment" caveat — it just can't be verified against a real physical device/APNs/FCM here. |
+| `EXPO_ACCESS_TOKEN`    | no       | unset                    | Expo's optional "enhanced security" push feature. Leave unset for normal operation. |
 
 ## Run the server
 
@@ -62,6 +67,9 @@ league_memberships, league_invites, teams, weeks, games, picks,
 league_week_results, device_tokens, notification_preferences,
 notifications_log, refresh_tokens, audit_log, sync_runs) — see the plan's
 "Data Model" section for rationale on the unique constraints.
+`00003_notification_outbox.sql` (Phase 7) adds notification_outbox, the
+pending-work queue the dispatcher drains — distinct from
+notifications_log, which is the sent/audit record.
 
 ## Database access (sqlc)
 

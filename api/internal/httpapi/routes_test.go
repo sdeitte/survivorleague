@@ -299,3 +299,35 @@ func TestRouteTable_ScheduleRoutesRequireAuth(t *testing.T) {
 		}
 	}
 }
+
+// TestRouteTable_NotificationRoutesRequireAuth is the Phase 7 extension of
+// the plan's "Auth & RBAC" regression-guard pattern: device-token
+// registration and notification preferences are per-user data with no
+// league scoping, so (unlike /leagues/{id}/... routes) requireAuth alone
+// is the correct — and sufficient — guard, not requireLeagueMember.
+func TestRouteTable_NotificationRoutesRequireAuth(t *testing.T) {
+	entries := walkRoutes(t, buildTestRouter(t))
+
+	want := map[string]bool{
+		"POST /me/device-tokens":           false,
+		"DELETE /me/device-tokens":         false,
+		"GET /me/notification-preferences": false,
+		"PUT /me/notification-preferences": false,
+	}
+
+	for _, e := range entries {
+		key := e.method + " " + e.route
+		if _, tracked := want[key]; !tracked {
+			continue
+		}
+		want[key] = true
+		if !hasMiddleware(e.middlewares, "RequireAuth") {
+			t.Errorf("%s does not carry RequireAuth; middlewares=%v", key, e.middlewares)
+		}
+	}
+	for key, seen := range want {
+		if !seen {
+			t.Errorf("expected notification route %q not found in route table", key)
+		}
+	}
+}

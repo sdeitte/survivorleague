@@ -156,6 +156,22 @@ export interface LeaderboardEntry {
   bought_back: boolean
 }
 
+// --- Notifications (Phase 7) ---
+//
+// Web has no push capability per the plan's stack (Expo Push is
+// mobile-only) — only the preferences resource is used here, not
+// device-token registration.
+
+export interface NotificationPreferences {
+  pick_reminder: boolean
+  eliminated: boolean
+  survived: boolean
+  mass_wipeout: boolean
+  buyback: boolean
+  email_enabled: boolean
+  push_enabled: boolean
+}
+
 export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -377,4 +393,16 @@ export async function listWeekPicks(leagueId: string, weekId: string): Promise<M
 
 export async function getLeaderboard(leagueId: string): Promise<LeaderboardEntry[]> {
   return apiFetch<LeaderboardEntry[]>(`/leagues/${leagueId}/leaderboard`)
+}
+
+// --- Notifications (Phase 7) ---
+
+export async function getNotificationPreferences(): Promise<NotificationPreferences> {
+  return apiFetch<NotificationPreferences>('/me/notification-preferences')
+}
+
+export async function updateNotificationPreferences(
+  prefs: NotificationPreferences,
+): Promise<NotificationPreferences> {
+  return apiFetch<NotificationPreferences>('/me/notification-preferences', { method: 'PUT', body: prefs })
 }

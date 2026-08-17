@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -29,19 +30,49 @@ type LeagueWeekPair struct {
 	WeekID   pgtype.UUID
 }
 
+// Notifier is the notification-enqueueing surface TryFinalizeLeagueWeek
+// calls into (Phase 7) once a league-week's finalization has committed.
+// Deliberately a small local interface rather than an import of
+// internal/notify — *notify.Service satisfies this structurally (Go
+// interfaces need no explicit implements declaration), so this package
+// stays decoupled from notify's own dependencies. A nil Notifier (the
+// zero value of Service.notifier, e.g. every pre-Phase-7 test that
+// constructs a Service via NewService without WithNotifier) is a valid,
+// silent no-op — see the calls in TryFinalizeLeagueWeek.
+type Notifier interface {
+	EnqueueEliminated(ctx context.Context, membershipID, leagueID, weekID pgtype.UUID) error
+	EnqueueSurvived(ctx context.Context, membershipID, leagueID, weekID pgtype.UUID) error
+	EnqueueMassWipeout(ctx context.Context, membershipID, leagueID, weekID pgtype.UUID) error
+}
+
 // Service implements the grading/elimination pipeline on top of the
 // sqlc-generated queries.
 type Service struct {
-	queries *gen.Queries
-	pool    *pgxpool.Pool
+	queries  *gen.Queries
+	pool     *pgxpool.Pool
+	notifier Notifier
+}
+
+// Option configures a Service at construction time.
+type Option func(*Service)
+
+// WithNotifier wires a Notifier into the Service — see the Notifier type
+// doc comment. Omit in any test that doesn't care about the Phase 7
+// notification side effects of finalization.
+func WithNotifier(n Notifier) Option {
+	return func(s *Service) { s.notifier = n }
 }
 
 // NewService constructs a Service. pool is used for GradeGame's and
 // TryFinalizeLeagueWeek's transactions (both need row-locking/atomic
 // idempotency guards); every other read runs a single statement through
 // queries.
-func NewService(queries *gen.Queries, pool *pgxpool.Pool) *Service {
-	return &Service{queries: queries, pool: pool}
+func NewService(queries *gen.Queries, pool *pgxpool.Pool, opts ...Option) *Service {
+	s := &Service{queries: queries, pool: pool}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // GradeGame grades every pending pick on gameID (result='win' if
@@ -195,6 +226,12 @@ func (s *Service) TryFinalizeLeagueWeek(ctx context.Context, leagueID, weekID pg
 		gameID       pgtype.UUID // zero value (Valid=false) for a missed pick
 	}
 	outcomes := make([]outcome, 0, len(contestants))
+	// winners is every membership whose pick resulted in a win this week —
+	// tracked separately from outcomes (which only ever holds
+	// eliminate=true entries) so that once massWipeout is known below,
+	// Phase 7's EnqueueSurvived can be called for exactly this set (a
+	// win, in a week that did NOT mass-wipe-out).
+	winners := make([]pgtype.UUID, 0, len(contestants))
 	anyWin := false
 	for _, m := range contestants {
 		pick, err := qtx.GetPickByMembershipAndWeek(ctx, gen.GetPickByMembershipAndWeekParams{
@@ -209,6 +246,7 @@ func (s *Service) TryFinalizeLeagueWeek(ctx context.Context, leagueID, weekID pg
 			return nil, fmt.Errorf("grading: get pick for membership %s: %w", db.UUIDString(m.ID), err)
 		case pick.Result == "win":
 			anyWin = true
+			winners = append(winners, m.ID)
 		case pick.Result == "loss":
 			outcomes = append(outcomes, outcome{membershipID: m.ID, eliminate: true, gameID: pick.GameID})
 		default:
@@ -252,6 +290,37 @@ func (s *Service) TryFinalizeLeagueWeek(ctx context.Context, leagueID, weekID pg
 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("grading: commit finalizing league %s week %s: %w", db.UUIDString(leagueID), db.UUIDString(weekID), err)
+	}
+
+	// Phase 7: enqueue notifications strictly after the finalization
+	// transaction has committed — a notification for a finalization that
+	// then rolled back would be worse than a missing one. Deliberately
+	// non-fatal: a notify failure here must never make an otherwise-
+	// successful finalization (already durably committed above) look like
+	// it failed to the caller. See the Notifier type doc comment for why
+	// s.notifier may be nil.
+	if s.notifier != nil {
+		if massWipeout {
+			for _, m := range contestants {
+				if err := s.notifier.EnqueueMassWipeout(ctx, m.ID, leagueID, weekID); err != nil {
+					log.Printf("grading: enqueue mass_wipeout notification for membership %s: %v", db.UUIDString(m.ID), err)
+				}
+			}
+		} else {
+			for _, o := range outcomes {
+				if !o.eliminate {
+					continue
+				}
+				if err := s.notifier.EnqueueEliminated(ctx, o.membershipID, leagueID, weekID); err != nil {
+					log.Printf("grading: enqueue eliminated notification for membership %s: %v", db.UUIDString(o.membershipID), err)
+				}
+			}
+			for _, membershipID := range winners {
+				if err := s.notifier.EnqueueSurvived(ctx, membershipID, leagueID, weekID); err != nil {
+					log.Printf("grading: enqueue survived notification for membership %s: %v", db.UUIDString(membershipID), err)
+				}
+			}
+		}
 	}
 
 	return &result, nil

@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import * as SecureStore from 'expo-secure-store';
 import * as api from '../api';
 import type { User } from '../api';
+import { registerForPushNotificationsAsync } from '../notifications';
 
 const ACCESS_TOKEN_KEY = 'survivor_league_access_token';
 const REFRESH_TOKEN_KEY = 'survivor_league_refresh_token';
@@ -116,20 +117,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Fire-and-forget: push registration must never block or fail a login/
+  // register flow (no EAS project / no physical device in this
+  // environment are both expected, non-fatal outcomes — see
+  // notifications.ts's doc comment). Runs after the session is already
+  // persisted so a failure here can't leave the user half-signed-in.
+  const registerPushTokenInBackground = useCallback((accessToken: string) => {
+    void (async () => {
+      try {
+        const registration = await registerForPushNotificationsAsync();
+        if (!registration) return;
+        await api.registerDeviceToken(accessToken, {
+          platform: registration.platform,
+          expo_push_token: registration.token,
+        });
+      } catch (err) {
+        console.warn('registerPushTokenInBackground: failed to register device token:', err);
+      }
+    })();
+  }, []);
+
   const login = useCallback(
     async (email: string, password: string) => {
       const session = await api.login({ email, password });
       await persistSession(session);
+      registerPushTokenInBackground(session.access_token);
     },
-    [persistSession],
+    [persistSession, registerPushTokenInBackground],
   );
 
   const registerFn = useCallback(
     async (email: string, password: string, displayName: string) => {
       const session = await api.register({ email, password, display_name: displayName });
       await persistSession(session);
+      registerPushTokenInBackground(session.access_token);
     },
-    [persistSession],
+    [persistSession, registerPushTokenInBackground],
   );
 
   const logout = useCallback(async () => {

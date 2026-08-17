@@ -402,6 +402,70 @@ type memberPickStatusResponse struct {
 	TeamID       string `json:"team_id,omitempty"`
 }
 
+// --- Notifications (Phase 7) ---
+
+// registerDeviceTokenRequest is the body of POST /me/device-tokens.
+type registerDeviceTokenRequest struct {
+	Platform      string `json:"platform"`
+	ExpoPushToken string `json:"expo_push_token"`
+}
+
+// deleteDeviceTokenRequest is the body of DELETE /me/device-tokens.
+type deleteDeviceTokenRequest struct {
+	ExpoPushToken string `json:"expo_push_token"`
+}
+
+type deviceTokenResponse struct {
+	ID        string `json:"id"`
+	Platform  string `json:"platform"`
+	CreatedAt string `json:"created_at"`
+}
+
+func toDeviceTokenResponse(t gen.DeviceToken) deviceTokenResponse {
+	return deviceTokenResponse{
+		ID:        db.UUIDString(t.ID),
+		Platform:  t.Platform,
+		CreatedAt: formatTimestamp(t.CreatedAt),
+	}
+}
+
+// notificationPreferencesResponse backs both GET and PUT
+// /me/notification-preferences.
+type notificationPreferencesResponse struct {
+	PickReminder bool `json:"pick_reminder"`
+	Eliminated   bool `json:"eliminated"`
+	Survived     bool `json:"survived"`
+	MassWipeout  bool `json:"mass_wipeout"`
+	Buyback      bool `json:"buyback"`
+	EmailEnabled bool `json:"email_enabled"`
+	PushEnabled  bool `json:"push_enabled"`
+}
+
+func toNotificationPreferencesResponse(p gen.NotificationPreference) notificationPreferencesResponse {
+	return notificationPreferencesResponse{
+		PickReminder: p.PickReminder,
+		Eliminated:   p.Eliminated,
+		Survived:     p.Survived,
+		MassWipeout:  p.MassWipeout,
+		Buyback:      p.Buyback,
+		EmailEnabled: p.EmailEnabled,
+		PushEnabled:  p.PushEnabled,
+	}
+}
+
+// updateNotificationPreferencesRequest is the body of PUT
+// /me/notification-preferences — a full-replace update (every field
+// required), matching UpsertNotificationPreferences' full-row upsert.
+type updateNotificationPreferencesRequest struct {
+	PickReminder bool `json:"pick_reminder"`
+	Eliminated   bool `json:"eliminated"`
+	Survived     bool `json:"survived"`
+	MassWipeout  bool `json:"mass_wipeout"`
+	Buyback      bool `json:"buyback"`
+	EmailEnabled bool `json:"email_enabled"`
+	PushEnabled  bool `json:"push_enabled"`
+}
+
 // --- Admin (Phase 3) ---
 
 type triggerScheduleSyncRequest struct {

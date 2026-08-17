@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -37,19 +38,45 @@ var (
 	ErrAlreadyBoughtBack = errors.New("leagues: membership has already used its one-time buy-back")
 )
 
+// Notifier is the notification-enqueueing surface BuyBackMember calls
+// into (Phase 7) once a reinstatement has succeeded. Deliberately a small
+// local interface rather than an import of internal/notify — *notify.Service
+// satisfies this structurally, so this package stays decoupled from
+// notify's own dependencies. A nil Notifier (every pre-Phase-7 test that
+// constructs a Service via NewService without WithNotifier) is a valid,
+// silent no-op.
+type Notifier interface {
+	EnqueueBuyback(ctx context.Context, membershipID, leagueID pgtype.UUID) error
+}
+
 // Service implements league CRUD, membership, and invite-code operations
 // on top of the sqlc-generated queries.
 type Service struct {
-	queries *gen.Queries
-	pool    *pgxpool.Pool
+	queries  *gen.Queries
+	pool     *pgxpool.Pool
+	notifier Notifier
+}
+
+// Option configures a Service at construction time.
+type Option func(*Service)
+
+// WithNotifier wires a Notifier into the Service — see the Notifier type
+// doc comment. Omit in any test that doesn't care about the Phase 7
+// notification side effects of a buy-back.
+func WithNotifier(n Notifier) Option {
+	return func(s *Service) { s.notifier = n }
 }
 
 // NewService constructs a Service. pool is used only for the
 // CreateLeague transaction (league row + the commissioner's own
 // membership row must be created atomically); every other method runs a
 // single statement through queries.
-func NewService(queries *gen.Queries, pool *pgxpool.Pool) *Service {
-	return &Service{queries: queries, pool: pool}
+func NewService(queries *gen.Queries, pool *pgxpool.Pool, opts ...Option) *Service {
+	s := &Service{queries: queries, pool: pool}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // CreateLeague creates a new league with a fresh unique invite code and,
@@ -332,6 +359,17 @@ func (s *Service) BuyBackMember(ctx context.Context, leagueID, membershipID, act
 		Metadata:    metadataJSON,
 	}); err != nil {
 		return gen.LeagueMembership{}, fmt.Errorf("leagues: write buyback audit_log row: %w", err)
+	}
+
+	// Phase 7: enqueue the buyback notification strictly after the update
+	// and audit_log write above have succeeded. Deliberately non-fatal —
+	// see grading.Service.TryFinalizeLeagueWeek's identical reasoning for
+	// why a notify failure must never make an otherwise-successful
+	// buy-back look like it failed to the caller.
+	if s.notifier != nil {
+		if err := s.notifier.EnqueueBuyback(ctx, membershipID, leagueID); err != nil {
+			log.Printf("leagues: enqueue buyback notification for membership %s: %v", db.UUIDString(membershipID), err)
+		}
 	}
 
 	return updated, nil
