@@ -128,6 +128,17 @@ func (s *Service) Refresh(ctx context.Context, rawToken string) (Session, error)
 	if err != nil {
 		return Session{}, ErrInvalidRefreshToken
 	}
+	// Mirror Login's active-status check. Without this, a user disabled via
+	// POST /admin/users/:id/disable while already holding a live refresh
+	// token could keep minting fresh access tokens forever (refresh tokens
+	// rotate on every use and live 30 days) — silently defeating the disable
+	// action for anyone already logged in. The presented token is still
+	// revoked above regardless of this check (fail closed: even a disabled
+	// user's dead token can't be replayed again), it just never gets a
+	// replacement.
+	if user.Status != "active" {
+		return Session{}, ErrInvalidRefreshToken
+	}
 
 	return s.issueSession(ctx, user)
 }
