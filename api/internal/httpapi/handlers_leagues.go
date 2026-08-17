@@ -200,6 +200,7 @@ func (a *API) handleListMembers(w http.ResponseWriter, r *http.Request) {
 			Role:         row.Role,
 			IsContestant: row.IsContestant,
 			Status:       row.Status,
+			BoughtBack:   row.BoughtBack,
 			JoinedAt:     formatTimestamp(row.JoinedAt),
 		})
 	}
@@ -268,6 +269,46 @@ func (a *API) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleBuyBackMember implements
+// POST /leagues/:id/members/:membershipId/buyback (Phase 6, requireCommissioner).
+// Reinstates an eliminated member on their one-time buy-back lifeline. See
+// leagues.Service.BuyBackMember for the exact validation order/error
+// mapping; the response is the updated membership record in full
+// (membershipResponse), not the trimmed membershipSummary used elsewhere.
+func (a *API) handleBuyBackMember(w http.ResponseWriter, r *http.Request) {
+	lc, ok := LeagueFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusForbidden, "not a member of this league")
+		return
+	}
+
+	membershipID, err := db.ParseUUID(chi.URLParam(r, "membershipId"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid membership id")
+		return
+	}
+
+	updated, err := a.leaguesService.BuyBackMember(r.Context(), lc.League.ID, membershipID, lc.Membership.UserID)
+	if err != nil {
+		switch {
+		case errors.Is(err, leagues.ErrMembershipNotFound):
+			writeError(w, http.StatusBadRequest, "membership not found in this league")
+			return
+		case errors.Is(err, leagues.ErrNotEliminated):
+			writeError(w, http.StatusBadRequest, "member is not currently eliminated — nothing to buy back")
+			return
+		case errors.Is(err, leagues.ErrAlreadyBoughtBack):
+			writeError(w, http.StatusConflict, "member has already used their one-time buy-back")
+			return
+		}
+		log.Printf("buy back member: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to buy back member")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toMembershipResponse(updated))
 }
 
 func (a *API) handleGetInviteCode(w http.ResponseWriter, r *http.Request) {

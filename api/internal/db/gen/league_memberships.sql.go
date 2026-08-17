@@ -11,6 +11,57 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const buyBackMembership = `-- name: BuyBackMembership :one
+UPDATE league_memberships
+SET status = 'active',
+    bought_back = true,
+    bought_back_at = now(),
+    bought_back_by = $1,
+    updated_at = now()
+WHERE id = $2
+  AND league_id = $3
+  AND status = 'eliminated'
+  AND bought_back = false
+RETURNING id, league_id, user_id, role, is_contestant, status, eliminated_week_id, eliminated_game_id, bought_back, bought_back_at, bought_back_by, created_at, updated_at, removed_at
+`
+
+type BuyBackMembershipParams struct {
+	BoughtBackBy pgtype.UUID `json:"bought_back_by"`
+	ID           pgtype.UUID `json:"id"`
+	LeagueID     pgtype.UUID `json:"league_id"`
+}
+
+// The buy-back mutation itself (Phase 6): reinstates an eliminated member
+// to status='active' and permanently flags bought_back=true. The WHERE
+// guard (status='eliminated' AND bought_back=false, on top of the id+
+// league_id scope) makes this safe to call concurrently — a race that
+// slips past the service layer's pre-check still can't double-apply a
+// buy-back, since the second racer's UPDATE matches zero rows once the
+// first commits. eliminated_week_id/eliminated_game_id are deliberately
+// left untouched: they remain the historical record of the elimination
+// that was bought back, not cleared.
+func (q *Queries) BuyBackMembership(ctx context.Context, arg BuyBackMembershipParams) (LeagueMembership, error) {
+	row := q.db.QueryRow(ctx, buyBackMembership, arg.BoughtBackBy, arg.ID, arg.LeagueID)
+	var i LeagueMembership
+	err := row.Scan(
+		&i.ID,
+		&i.LeagueID,
+		&i.UserID,
+		&i.Role,
+		&i.IsContestant,
+		&i.Status,
+		&i.EliminatedWeekID,
+		&i.EliminatedGameID,
+		&i.BoughtBack,
+		&i.BoughtBackAt,
+		&i.BoughtBackBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.RemovedAt,
+	)
+	return i, err
+}
+
 const createLeagueMembership = `-- name: CreateLeagueMembership :one
 INSERT INTO league_memberships (league_id, user_id, role, is_contestant, status)
 VALUES ($1, $2, $3, $4, 'active')
@@ -77,6 +128,44 @@ func (q *Queries) GetLeagueMembershipByID(ctx context.Context, id pgtype.UUID) (
 	return i, err
 }
 
+const getMembershipByIDAndLeague = `-- name: GetMembershipByIDAndLeague :one
+SELECT id, league_id, user_id, role, is_contestant, status, eliminated_week_id, eliminated_game_id, bought_back, bought_back_at, bought_back_by, created_at, updated_at, removed_at FROM league_memberships
+WHERE id = $1 AND league_id = $2 AND removed_at IS NULL
+`
+
+type GetMembershipByIDAndLeagueParams struct {
+	ID       pgtype.UUID `json:"id"`
+	LeagueID pgtype.UUID `json:"league_id"`
+}
+
+// Scoped lookup used by buy-back (Phase 6) to validate that membershipId
+// belongs to leagueId before any status/bought_back checks run — mirrors
+// RemoveMembership's same "wrong league, already removed, or nonexistent
+// all collapse to no rows" contract, except this is a plain read (the
+// caller applies its own conditional UPDATE afterward) rather than a
+// mutation.
+func (q *Queries) GetMembershipByIDAndLeague(ctx context.Context, arg GetMembershipByIDAndLeagueParams) (LeagueMembership, error) {
+	row := q.db.QueryRow(ctx, getMembershipByIDAndLeague, arg.ID, arg.LeagueID)
+	var i LeagueMembership
+	err := row.Scan(
+		&i.ID,
+		&i.LeagueID,
+		&i.UserID,
+		&i.Role,
+		&i.IsContestant,
+		&i.Status,
+		&i.EliminatedWeekID,
+		&i.EliminatedGameID,
+		&i.BoughtBack,
+		&i.BoughtBackAt,
+		&i.BoughtBackBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.RemovedAt,
+	)
+	return i, err
+}
+
 const getMembershipByLeagueAndUser = `-- name: GetMembershipByLeagueAndUser :one
 SELECT id, league_id, user_id, role, is_contestant, status, eliminated_week_id, eliminated_game_id, bought_back, bought_back_at, bought_back_by, created_at, updated_at, removed_at FROM league_memberships
 WHERE league_id = $1 AND user_id = $2 AND removed_at IS NULL
@@ -119,6 +208,7 @@ SELECT
     m.role AS role,
     m.is_contestant AS is_contestant,
     m.status AS status,
+    m.bought_back AS bought_back,
     m.created_at AS joined_at
 FROM league_memberships m
 JOIN users u ON u.id = m.user_id
@@ -133,6 +223,7 @@ type ListActiveMembersWithUserRow struct {
 	Role         string             `json:"role"`
 	IsContestant bool               `json:"is_contestant"`
 	Status       string             `json:"status"`
+	BoughtBack   bool               `json:"bought_back"`
 	JoinedAt     pgtype.Timestamptz `json:"joined_at"`
 }
 
@@ -152,6 +243,7 @@ func (q *Queries) ListActiveMembersWithUser(ctx context.Context, leagueID pgtype
 			&i.Role,
 			&i.IsContestant,
 			&i.Status,
+			&i.BoughtBack,
 			&i.JoinedAt,
 		); err != nil {
 			return nil, err

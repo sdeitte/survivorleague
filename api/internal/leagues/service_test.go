@@ -451,7 +451,7 @@ func TestService_ListLeaderboard_SortOrder(t *testing.T) {
 	}
 	for _, row := range rows {
 		if row.BoughtBack {
-			t.Errorf("row %s BoughtBack = true, want false (Phase 6 not built yet)", row.MembershipID)
+			t.Errorf("row %s BoughtBack = true, want false (nobody in this fixture was bought back)", row.MembershipID)
 		}
 	}
 }

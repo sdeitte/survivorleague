@@ -56,7 +56,25 @@ export interface Member {
   role: 'commissioner' | 'player';
   is_contestant: boolean;
   status: 'active' | 'eliminated';
+  bought_back: boolean;
   joined_at: string;
+}
+
+// Membership is the full record returned by the buy-back endpoint —
+// richer than Member/MembershipSummary since it surfaces the
+// eliminated_*/bought_back_* fields a buy-back response needs to show.
+export interface Membership {
+  membership_id: string;
+  league_id: string;
+  user_id: string;
+  role: 'commissioner' | 'player';
+  is_contestant: boolean;
+  status: 'active' | 'eliminated';
+  eliminated_week_id?: string;
+  eliminated_game_id?: string;
+  bought_back: boolean;
+  bought_back_at?: string;
+  bought_back_by?: string;
 }
 
 export interface InviteCodeResponse {
@@ -267,6 +285,11 @@ export async function listMembers(accessToken: string, leagueId: string): Promis
 export async function removeMember(accessToken: string, leagueId: string, membershipId: string): Promise<void> {
   const res = await rawFetch(`/leagues/${leagueId}/members/${membershipId}`, { method: 'DELETE', accessToken });
   await parseJsonOrThrow<void>(res);
+}
+
+export async function buyBackMember(accessToken: string, leagueId: string, membershipId: string): Promise<Membership> {
+  const res = await rawFetch(`/leagues/${leagueId}/members/${membershipId}/buyback`, { method: 'POST', accessToken });
+  return parseJsonOrThrow<Membership>(res);
 }
 
 export async function getInviteCode(accessToken: string, leagueId: string): Promise<InviteCodeResponse> {

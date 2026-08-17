@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import * as Dialog from '@radix-ui/react-dialog'
 import {
+  buyBackMember,
   getInviteCode,
   getLeague,
   listMembers,
@@ -20,6 +21,7 @@ export function LeagueDetailPage() {
   const [actionError, setActionError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [memberToRemove, setMemberToRemove] = useState<Member | null>(null)
+  const [memberToBuyBack, setMemberToBuyBack] = useState<Member | null>(null)
 
   const leagueQuery = useQuery({
     queryKey: ['league', id],
@@ -64,6 +66,19 @@ export function LeagueDetailPage() {
     onError: (err) => {
       setActionError(err instanceof ApiError ? err.message : 'Failed to remove member.')
       setMemberToRemove(null)
+    },
+  })
+
+  const buyBackMutation = useMutation({
+    mutationFn: (membershipId: string) => buyBackMember(id!, membershipId),
+    onSuccess: () => {
+      setMemberToBuyBack(null)
+      void queryClient.invalidateQueries({ queryKey: ['league', id, 'members'] })
+      void queryClient.invalidateQueries({ queryKey: ['league', id, 'leaderboard'] })
+    },
+    onError: (err) => {
+      setActionError(err instanceof ApiError ? err.message : 'Failed to buy back member.')
+      setMemberToBuyBack(null)
     },
   })
 
@@ -208,15 +223,30 @@ export function LeagueDetailPage() {
                   {member.status === 'eliminated' && ' · eliminated'}
                 </p>
               </div>
-              {isCommissioner && member.role !== 'commissioner' && (
-                <button
-                  type="button"
-                  onClick={() => setMemberToRemove(member)}
-                  className="text-xs text-red-400 underline"
-                >
-                  Remove
-                </button>
-              )}
+              <div className="flex items-center gap-3">
+                {isCommissioner && member.status === 'eliminated' && (
+                  member.bought_back ? (
+                    <span className="text-xs text-slate-500">Buy-back already used</span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setMemberToBuyBack(member)}
+                      className="text-xs text-emerald-400 underline"
+                    >
+                      Buy back
+                    </button>
+                  )
+                )}
+                {isCommissioner && member.role !== 'commissioner' && (
+                  <button
+                    type="button"
+                    onClick={() => setMemberToRemove(member)}
+                    className="text-xs text-red-400 underline"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -244,6 +274,35 @@ export function LeagueDetailPage() {
                 className="flex-1 rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
               >
                 {removeMemberMutation.isPending ? 'Removing…' : 'Remove'}
+              </button>
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      <Dialog.Root open={!!memberToBuyBack} onOpenChange={(open) => !open && setMemberToBuyBack(null)}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 bg-black/60" />
+          <Dialog.Content className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-4">
+            <Dialog.Title className="text-lg font-semibold text-slate-100">Buy back this member?</Dialog.Title>
+            <Dialog.Description className="text-sm text-slate-400">
+              {memberToBuyBack?.display_name} will be reinstated as an active contestant. This is a one-time
+              lifeline per member — it cannot be undone or used again for them, even if they're eliminated
+              again later. Their previously-used teams stay locked.
+            </Dialog.Description>
+            <div className="flex gap-2">
+              <Dialog.Close asChild>
+                <button type="button" className="flex-1 rounded-md border border-slate-700 px-3 py-1.5 text-sm text-slate-100">
+                  Cancel
+                </button>
+              </Dialog.Close>
+              <button
+                type="button"
+                disabled={buyBackMutation.isPending}
+                onClick={() => memberToBuyBack && buyBackMutation.mutate(memberToBuyBack.membership_id)}
+                className="flex-1 rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+              >
+                {buyBackMutation.isPending ? 'Buying back…' : 'Buy back'}
               </button>
             </div>
           </Dialog.Content>

@@ -11,6 +11,16 @@ import (
 )
 
 type Querier interface {
+	// The buy-back mutation itself (Phase 6): reinstates an eliminated member
+	// to status='active' and permanently flags bought_back=true. The WHERE
+	// guard (status='eliminated' AND bought_back=false, on top of the id+
+	// league_id scope) makes this safe to call concurrently — a race that
+	// slips past the service layer's pre-check still can't double-apply a
+	// buy-back, since the second racer's UPDATE matches zero rows once the
+	// first commits. eliminated_week_id/eliminated_game_id are deliberately
+	// left untouched: they remain the historical record of the elimination
+	// that was bought back, not cleared.
+	BuyBackMembership(ctx context.Context, arg BuyBackMembershipParams) (LeagueMembership, error)
 	// Every commissioner/admin privileged action writes a row here per the
 	// plan's Data Model section. league_id/target_type/target_id are nullable
 	// (e.g. a schedule_sync action has no league scope).
@@ -50,6 +60,13 @@ type Querier interface {
 	GetLeagueByInviteCode(ctx context.Context, inviteCode string) (League, error)
 	GetLeagueMembershipByID(ctx context.Context, id pgtype.UUID) (LeagueMembership, error)
 	GetLeagueWeekResultByLeagueAndWeek(ctx context.Context, arg GetLeagueWeekResultByLeagueAndWeekParams) (LeagueWeekResult, error)
+	// Scoped lookup used by buy-back (Phase 6) to validate that membershipId
+	// belongs to leagueId before any status/bought_back checks run — mirrors
+	// RemoveMembership's same "wrong league, already removed, or nonexistent
+	// all collapse to no rows" contract, except this is a plain read (the
+	// caller applies its own conditional UPDATE afterward) rather than a
+	// mutation.
+	GetMembershipByIDAndLeague(ctx context.Context, arg GetMembershipByIDAndLeagueParams) (LeagueMembership, error)
 	// Excludes removed members by design: this backs requireLeagueMember, where
 	// a removed_at row must behave exactly like "never joined" (403).
 	GetMembershipByLeagueAndUser(ctx context.Context, arg GetMembershipByLeagueAndUserParams) (LeagueMembership, error)

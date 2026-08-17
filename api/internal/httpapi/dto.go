@@ -133,7 +133,46 @@ type memberResponse struct {
 	Role         string `json:"role"`
 	IsContestant bool   `json:"is_contestant"`
 	Status       string `json:"status"`
+	BoughtBack   bool   `json:"bought_back"`
 	JoinedAt     string `json:"joined_at"`
+}
+
+// membershipResponse is the full membership record returned by
+// POST .../members/:membershipId/buyback (Phase 6) — richer than
+// membershipSummary since a client acting on a buy-back needs to see the
+// bought_back/bought_back_at/eliminated_* fields it just changed (or, for
+// eliminated_week_id/eliminated_game_id, deliberately did NOT change).
+type membershipResponse struct {
+	MembershipID     string `json:"membership_id"`
+	LeagueID         string `json:"league_id"`
+	UserID           string `json:"user_id"`
+	Role             string `json:"role"`
+	IsContestant     bool   `json:"is_contestant"`
+	Status           string `json:"status"`
+	EliminatedWeekID string `json:"eliminated_week_id,omitempty"`
+	EliminatedGameID string `json:"eliminated_game_id,omitempty"`
+	BoughtBack       bool   `json:"bought_back"`
+	BoughtBackAt     string `json:"bought_back_at,omitempty"`
+	BoughtBackBy     string `json:"bought_back_by,omitempty"`
+}
+
+func toMembershipResponse(m gen.LeagueMembership) membershipResponse {
+	resp := membershipResponse{
+		MembershipID:     db.UUIDString(m.ID),
+		LeagueID:         db.UUIDString(m.LeagueID),
+		UserID:           db.UUIDString(m.UserID),
+		Role:             m.Role,
+		IsContestant:     m.IsContestant,
+		Status:           m.Status,
+		EliminatedWeekID: pgUUIDStringOrEmpty(m.EliminatedWeekID),
+		EliminatedGameID: pgUUIDStringOrEmpty(m.EliminatedGameID),
+		BoughtBack:       m.BoughtBack,
+		BoughtBackBy:     pgUUIDStringOrEmpty(m.BoughtBackBy),
+	}
+	if m.BoughtBackAt.Valid {
+		resp.BoughtBackAt = formatTimestamp(m.BoughtBackAt)
+	}
+	return resp
 }
 
 // leaderboardEntryResponse is one row of GET /leagues/:id/leaderboard.

@@ -74,7 +74,20 @@ func nextID() int64 {
 	return idCounter
 }
 
-var seasonYearCounter int32 = 93000
+// seasonYearCounter starts from a process-seeded value (mirrors idCounter
+// above) rather than a fixed literal. These are integration tests against
+// a persistent, un-truncated local Postgres (no per-test rollback) — a
+// fixed starting literal reproduces the exact same season_year sequence on
+// every `go test` invocation, so leftover rows from an earlier run (e.g. a
+// week that's missing one of its games' final grade, per
+// TestTryFinalizeLeagueWeek_PostponedGameBlocksFinalization-style
+// fixtures) get silently reused by a later run's UpsertWeek call instead
+// of getting a fresh week, which can make otherwise-deterministic tests
+// (e.g. TestTryFinalizeLeagueWeek_Idempotent) flake depending on what a
+// prior invocation happened to leave behind. Seeding from the wall clock
+// makes that collision astronomically unlikely without needing real
+// per-test DB isolation.
+var seasonYearCounter int32 = 50000 + int32(time.Now().UnixNano()%40000)
 
 func uniqueSeasonYear() int32 {
 	seasonYearCounter++

@@ -15,11 +15,12 @@ info:
     no-repeat-team rule, plus pre-lock pick-hiding for other league members.
     Phase 5 adds the leaderboard endpoint — the grading/elimination pipeline
     and the live poll loop that drives it are internal (internal/grading,
-    internal/livepoll), not client-facing API surface. Buy-back, admin
-    views, and the rest of site-admin are added incrementally in later
-    phases per the roadmap — see
+    internal/livepoll), not client-facing API surface. Phase 6 adds the
+    commissioner buy-back endpoint (one-time-ever reinstatement of an
+    eliminated member). Admin views and the rest of site-admin are added
+    incrementally in later phases per the roadmap — see
     /Users/sdeitte/.claude/plans/witty-questing-barto.md.
-  version: 0.5.0
+  version: 0.6.0
 servers:
   - url: http://localhost:8080
     description: Local development
@@ -480,8 +481,10 @@ paths:
         commissioners alike) in standings order: active members first, then
         eliminated members ordered by eliminated_week_id descending (later
         elimination = survived longer = ranks higher among the eliminated).
-        `bought_back` is always `false` for now — Phase 6 hasn't been built
-        yet — but is included from day one for forward compatibility.
+        `bought_back` reflects the member's one-time-ever buy-back history
+        (see POST /leagues/{id}/members/{membershipId}/buyback) — a
+        reinstated member ranks among the active group, with
+        `bought_back=true`.
       tags:
         - Leagues
       responses:
@@ -548,6 +551,75 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: League not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /leagues/{id}/members/{membershipId}/buyback:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: membershipId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: buyBackLeagueMember
+      summary: Reinstate an eliminated member (commissioner only, one-time-ever)
+      description: >
+        Requires role=commissioner (requireCommissioner). Reinstates an
+        eliminated member: sets status='active', bought_back=true,
+        bought_back_at=now(), bought_back_by=<the commissioner's user id>,
+        all in one update. eliminated_week_id/eliminated_game_id are left
+        untouched — they remain the historical record of the elimination
+        that was bought back, not cleared. This is a one-time-ever lifeline
+        per member: once bought_back is true it can never be used again,
+        even after a later re-elimination (checked against the bought_back
+        flag itself, not current status). Previously-used teams stay
+        locked after reinstatement — enforced by the same
+        UNIQUE(league_membership_id, team_id) constraint picks already
+        rely on, no special-casing needed. Writes an audit_log row
+        (action=buyback).
+      tags:
+        - Leagues
+      responses:
+        "200":
+          description: The reinstated membership
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Membership"
+        "400":
+          description: >
+            membershipId does not resolve to a currently-active member of
+            this league, or the member's current status is not
+            'eliminated' (still active, or never eliminated) — nothing to
+            buy back.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not the league's commissioner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: League not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: This member has already used their one-time buy-back
           content:
             application/json:
               schema:
@@ -1333,6 +1405,7 @@ components:
         - role
         - is_contestant
         - status
+        - bought_back
         - joined_at
       properties:
         membership_id:
@@ -1351,9 +1424,68 @@ components:
         status:
           type: string
           enum: [active, eliminated]
+        bought_back:
+          type: boolean
+          description: >
+            True if this member has already used their one-time-ever
+            buy-back (see POST .../buyback) — commissioners should hide or
+            disable a buy-back action for such a member rather than let
+            them attempt (and get 409'd on) a second one.
         joined_at:
           type: string
           format: date-time
+
+    Membership:
+      type: object
+      description: >
+        The full membership record — richer than the trimmed Member/
+        MembershipSummary shapes used elsewhere, since a buy-back response
+        needs to surface the fields it just changed (and, for
+        eliminated_week_id/eliminated_game_id, deliberately did not
+        change). Returned by POST .../members/{membershipId}/buyback.
+      required:
+        - membership_id
+        - league_id
+        - user_id
+        - role
+        - is_contestant
+        - status
+        - bought_back
+      properties:
+        membership_id:
+          type: string
+          format: uuid
+        league_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [commissioner, player]
+        is_contestant:
+          type: boolean
+        status:
+          type: string
+          enum: [active, eliminated]
+        eliminated_week_id:
+          type: string
+          format: uuid
+          description: Present only when status=eliminated, or a past elimination was bought back.
+        eliminated_game_id:
+          type: string
+          format: uuid
+          description: Present only when the elimination (past or current) was via a losing pick, not a missed pick.
+        bought_back:
+          type: boolean
+        bought_back_at:
+          type: string
+          format: date-time
+        bought_back_by:
+          type: string
+          format: uuid
+          description: The commissioner user id who granted the buy-back.
 
     LeaderboardEntry:
       type: object

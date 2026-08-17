@@ -112,10 +112,11 @@ func TestRouteTable_CommissionerOnlyRoutesRequireCommissioner(t *testing.T) {
 	entries := walkRoutes(t, buildTestRouter(t))
 
 	want := map[string]bool{
-		"PATCH /leagues/{id}/":                        false,
-		"DELETE /leagues/{id}/members/{membershipId}": false,
-		"GET /leagues/{id}/invite":                    false,
-		"POST /leagues/{id}/invite/regenerate":        false,
+		"PATCH /leagues/{id}/":                              false,
+		"DELETE /leagues/{id}/members/{membershipId}":       false,
+		"POST /leagues/{id}/members/{membershipId}/buyback": false,
+		"GET /leagues/{id}/invite":                          false,
+		"POST /leagues/{id}/invite/regenerate":              false,
 	}
 
 	for _, e := range entries {

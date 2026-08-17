@@ -56,6 +56,15 @@ export function LeagueDetailScreen({
     onError: (err) => setActionError(err instanceof ApiError ? err.message : 'Failed to remove member.'),
   });
 
+  const buyBackMutation = useMutation({
+    mutationFn: (membershipId: string) => authFetch((token) => api.buyBackMember(token, leagueId, membershipId)),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['league', leagueId, 'members'] });
+      void queryClient.invalidateQueries({ queryKey: ['league', leagueId, 'leaderboard'] });
+    },
+    onError: (err) => setActionError(err instanceof ApiError ? err.message : 'Failed to buy back member.'),
+  });
+
   const confirmRemove = (member: Member) => {
     Alert.alert(
       'Remove member?',
@@ -66,6 +75,20 @@ export function LeagueDetailScreen({
           text: 'Remove',
           style: 'destructive',
           onPress: () => removeMemberMutation.mutate(member.membership_id),
+        },
+      ],
+    );
+  };
+
+  const confirmBuyBack = (member: Member) => {
+    Alert.alert(
+      'Buy back this member?',
+      `${member.display_name} will be reinstated as an active contestant. This is a one-time lifeline per member — it cannot be undone or used again for them, even if they're eliminated again later. Their previously-used teams stay locked.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Buy back',
+          onPress: () => buyBackMutation.mutate(member.membership_id),
         },
       ],
     );
@@ -191,11 +214,22 @@ export function LeagueDetailScreen({
                 {item.status === 'eliminated' && ' · eliminated'}
               </Text>
             </View>
-            {isCommissioner && item.role !== 'commissioner' && (
-              <Pressable onPress={() => confirmRemove(item)}>
-                <Text style={styles.removeLink}>Remove</Text>
-              </Pressable>
-            )}
+            <View style={styles.memberActions}>
+              {isCommissioner && item.status === 'eliminated' && (
+                item.bought_back ? (
+                  <Text style={styles.buyBackUsedText}>Buy-back already used</Text>
+                ) : (
+                  <Pressable onPress={() => confirmBuyBack(item)}>
+                    <Text style={styles.buyBackLink}>Buy back</Text>
+                  </Pressable>
+                )
+              )}
+              {isCommissioner && item.role !== 'commissioner' && (
+                <Pressable onPress={() => confirmRemove(item)}>
+                  <Text style={styles.removeLink}>Remove</Text>
+                </Pressable>
+              )}
+            </View>
           </View>
         )}
       />
@@ -344,10 +378,24 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
   },
+  memberActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
   removeLink: {
     color: '#f87171',
     fontSize: 12,
     textDecorationLine: 'underline',
+  },
+  buyBackLink: {
+    color: '#34d399',
+    fontSize: 12,
+    textDecorationLine: 'underline',
+  },
+  buyBackUsedText: {
+    color: '#64748b',
+    fontSize: 12,
   },
   error: {
     color: '#f87171',

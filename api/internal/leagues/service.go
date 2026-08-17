@@ -2,12 +2,15 @@ package leagues
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/sdeitte/survivor-league-api/internal/db"
 	"github.com/sdeitte/survivor-league-api/internal/db/gen"
 )
 
@@ -22,6 +25,16 @@ var (
 	// ErrAlreadyMember is returned by JoinByCode when the user already has
 	// an active (non-removed) membership in the target league.
 	ErrAlreadyMember = errors.New("leagues: user already has an active membership in this league")
+	// ErrNotEliminated is returned by BuyBackMember when the target
+	// membership's current status isn't 'eliminated' — nothing to buy back,
+	// whether because they're still active or were never eliminated.
+	ErrNotEliminated = errors.New("leagues: membership is not currently eliminated")
+	// ErrAlreadyBoughtBack is returned by BuyBackMember when the target
+	// membership's bought_back flag is already true — buy-back is a
+	// one-time-ever lifeline, checked against this flag rather than current
+	// status history, so a member eliminated a second time after being
+	// bought back does not get a second one.
+	ErrAlreadyBoughtBack = errors.New("leagues: membership has already used its one-time buy-back")
 )
 
 // Service implements league CRUD, membership, and invite-code operations
@@ -240,4 +253,96 @@ func (s *Service) JoinByCode(ctx context.Context, leagueID, userID pgtype.UUID) 
 		return gen.LeagueMembership{}, err
 	}
 	return m, nil
+}
+
+// BuyBackMember reinstates an eliminated member (status -> 'active') on
+// the commissioner's one-time-per-member buy-back lifeline. Validates, in
+// order:
+//  1. membershipID resolves to a currently non-removed member of leagueID
+//     (ErrMembershipNotFound otherwise — same cross-league/nonexistent/
+//     already-removed collapse as RemoveMember).
+//  2. that member's current status is 'eliminated' (ErrNotEliminated
+//     otherwise — nothing to buy back, whether still active or never
+//     eliminated).
+//  3. that member's bought_back flag is still false (ErrAlreadyBoughtBack
+//     otherwise — buy-back is one-time-ever, checked against this flag,
+//     not current status, so a second elimination after a buy-back never
+//     grants a second one).
+//
+// On success, updates status/bought_back/bought_back_at/bought_back_by in
+// one statement (BuyBackMembership's WHERE guard also protects against a
+// concurrent double-buy-back race slipping past steps 2/3 above) and
+// writes an audit_log row, following the same commissioner-privileged-
+// action pattern as internal/admin's TriggerScheduleSync.
+// eliminated_week_id/eliminated_game_id are left untouched by the update
+// — they remain the historical record of the elimination that was bought
+// back.
+func (s *Service) BuyBackMember(ctx context.Context, leagueID, membershipID, actorUserID pgtype.UUID) (gen.LeagueMembership, error) {
+	current, err := s.queries.GetMembershipByIDAndLeague(ctx, gen.GetMembershipByIDAndLeagueParams{
+		ID:       membershipID,
+		LeagueID: leagueID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return gen.LeagueMembership{}, ErrMembershipNotFound
+		}
+		return gen.LeagueMembership{}, err
+	}
+	if current.Status != "eliminated" {
+		return gen.LeagueMembership{}, ErrNotEliminated
+	}
+	if current.BoughtBack {
+		return gen.LeagueMembership{}, ErrAlreadyBoughtBack
+	}
+
+	updated, err := s.queries.BuyBackMembership(ctx, gen.BuyBackMembershipParams{
+		ID:           membershipID,
+		LeagueID:     leagueID,
+		BoughtBackBy: actorUserID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Lost a race against a concurrent buy-back attempt (or removal)
+			// between the checks above and this update.
+			return gen.LeagueMembership{}, ErrAlreadyBoughtBack
+		}
+		return gen.LeagueMembership{}, err
+	}
+
+	metadata := map[string]any{
+		"eliminated_game_id": pgUUIDStringOrNil(current.EliminatedGameID),
+	}
+	if current.EliminatedWeekID.Valid {
+		metadata["eliminated_week_id"] = db.UUIDString(current.EliminatedWeekID)
+		if week, werr := s.queries.GetWeekByID(ctx, current.EliminatedWeekID); werr == nil {
+			metadata["eliminated_week_number"] = week.WeekNumber
+			metadata["season_year"] = week.SeasonYear
+		}
+	}
+	metadataJSON, merr := json.Marshal(metadata)
+	if merr != nil {
+		return gen.LeagueMembership{}, fmt.Errorf("leagues: marshal buyback audit_log metadata: %w", merr)
+	}
+	if _, err := s.queries.CreateAuditLog(ctx, gen.CreateAuditLogParams{
+		ActorUserID: actorUserID,
+		LeagueID:    leagueID,
+		Action:      "buyback",
+		TargetType:  pgtype.Text{String: "league_membership", Valid: true},
+		TargetID:    membershipID,
+		Metadata:    metadataJSON,
+	}); err != nil {
+		return gen.LeagueMembership{}, fmt.Errorf("leagues: write buyback audit_log row: %w", err)
+	}
+
+	return updated, nil
+}
+
+// pgUUIDStringOrNil returns the UUID's string form, or nil for a JSON
+// metadata value when the UUID is unset (e.g. eliminated_game_id for a
+// missed-pick elimination, which has no game to point at).
+func pgUUIDStringOrNil(v pgtype.UUID) any {
+	if !v.Valid {
+		return nil
+	}
+	return db.UUIDString(v)
 }
