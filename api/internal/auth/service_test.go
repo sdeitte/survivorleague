@@ -44,7 +44,7 @@ func newTestAuthService(t *testing.T) (*Service, *gen.Queries) {
 	t.Cleanup(pool.Close)
 
 	q := gen.New(pool)
-	return NewService(q, NewJWTIssuer("test-secret"), ""), q
+	return NewService(q, pool, NewJWTIssuer("test-secret"), ""), q
 }
 
 // TestRefresh_DisabledUserCannotMintNewSession is a Phase 10 security-audit

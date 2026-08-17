@@ -3,14 +3,17 @@ package auth
 import (
 	"context"
 	"errors"
+	"log"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/sdeitte/survivor-league-api/internal/db"
 	"github.com/sdeitte/survivor-league-api/internal/db/gen"
+	"github.com/sdeitte/survivor-league-api/internal/notify"
 )
 
 // postgresUniqueViolation is the SQLSTATE code Postgres returns for a
@@ -39,27 +42,66 @@ type Session struct {
 	User         gen.User
 }
 
-// Service implements registration, login, refresh-token rotation, and
-// profile lookups/updates on top of the sqlc-generated queries.
+// Service implements registration, login, refresh-token rotation,
+// password-reset/email-verification, and profile lookups/updates on top
+// of the sqlc-generated queries.
 type Service struct {
-	queries    *gen.Queries
-	jwt        *JWTIssuer
-	adminEmail string
+	queries     *gen.Queries
+	pool        *pgxpool.Pool
+	jwt         *JWTIssuer
+	adminEmail  string
+	emailSender notify.EmailSender
+	webBaseURL  string
+}
+
+// Option configures a Service at construction time.
+type Option func(*Service)
+
+// WithEmailSender wires an EmailSender into the Service, used to send
+// password-reset and email-verification links directly (bypassing Phase
+// 7's notification_outbox — see the package doc comment on why). Reuses
+// internal/notify's EmailSender interface/ResendEmailSender rather than a
+// second email client. Omitting this option (nil emailSender) is a valid,
+// silent no-op — every test that doesn't care about email delivery uses
+// this.
+func WithEmailSender(sender notify.EmailSender) Option {
+	return func(s *Service) { s.emailSender = sender }
+}
+
+// WithWebBaseURL sets the frontend base URL used to build reset-password/
+// verify-email links (e.g. "https://app.survivor-league.example" ->
+// ".../reset-password?token=..."). Defaults to empty, which still
+// produces a syntactically valid (if host-relative) link — fine for tests
+// that only assert on the token/query param, not the full URL.
+func WithWebBaseURL(url string) Option {
+	return func(s *Service) { s.webBaseURL = url }
 }
 
 // NewService constructs a Service. adminEmail may be empty, in which case
-// no registration ever auto-grants is_site_admin.
-func NewService(queries *gen.Queries, jwt *JWTIssuer, adminEmail string) *Service {
-	return &Service{
+// no registration ever auto-grants is_site_admin. pool is used for the
+// multi-statement transactions in ResetPassword/VerifyEmail (mirrors
+// internal/leagues and internal/grading's own pool.Begin+WithTx pattern
+// for operations that must commit-or-rollback together).
+func NewService(queries *gen.Queries, pool *pgxpool.Pool, jwt *JWTIssuer, adminEmail string, opts ...Option) *Service {
+	s := &Service{
 		queries:    queries,
+		pool:       pool,
 		jwt:        jwt,
 		adminEmail: strings.ToLower(strings.TrimSpace(adminEmail)),
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Register creates a new user (hashing password with argon2id) and, per
 // the API contract, immediately issues a session exactly as Login would —
-// there is no email-verification gate in this phase.
+// there is no email-verification gate on login/session issuance. A
+// verification email is sent as a side effect (via issueEmailVerification
+// Token, the same code path POST /auth/resend-verification uses) but a
+// failure to send it never fails registration itself — verification is
+// informational/eventual for this app, not a blocker.
 func (s *Service) Register(ctx context.Context, email, password, displayName string) (Session, error) {
 	hash, err := HashPassword(password)
 	if err != nil {
@@ -81,6 +123,10 @@ func (s *Service) Register(ctx context.Context, email, password, displayName str
 			return Session{}, ErrEmailTaken
 		}
 		return Session{}, err
+	}
+
+	if err := s.issueEmailVerificationToken(ctx, user.ID, user.Email); err != nil {
+		log.Printf("auth: issue verification token for new user %s: %v", user.Email, err)
 	}
 
 	return s.issueSession(ctx, user)

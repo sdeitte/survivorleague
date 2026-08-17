@@ -18,6 +18,10 @@
 // disable/enable, single-game CFBD resync (reusing internal/grading's
 // GradeGame/TryFinalizeLeagueWeek — the reason adminService is now
 // constructed after gradingService below), and the audit log viewer.
+// A post-Phase-10 addition wires password reset and email verification
+// into authService (internal/auth/password_reset.go) — sent directly
+// through the same ResendEmailSender constructed here for Phase 7,
+// independent of the notification_outbox dispatcher.
 // Route wiring lives in internal/httpapi; this file just reads
 // configuration from the environment, assembles dependencies, and owns
 // process lifecycle (HTTP server + cron scheduler + live poll loop +
@@ -77,6 +81,12 @@ func main() {
 	corsAllowedOrigin := getenv("CORS_ALLOWED_ORIGIN", "http://localhost:5173")
 	adminEmail := os.Getenv("ADMIN_EMAIL")
 
+	// WEB_BASE_URL is the frontend origin used to build password-reset and
+	// email-verification links (e.g. "{WEB_BASE_URL}/reset-password?token=...")
+	// — see internal/auth/password_reset.go. Defaults to the local Vite dev
+	// server, matching CORS_ALLOWED_ORIGIN's own default.
+	webBaseURL := getenv("WEB_BASE_URL", "http://localhost:5173")
+
 	// CFBD_BASE_URL is configurable specifically so it can be pointed at a
 	// mock HTTP server for local/E2E testing — there is no live CFBD API
 	// key in this environment yet (see internal/schedule/cfbd_client.go).
@@ -129,7 +139,14 @@ func main() {
 
 	jwtIssuer := auth.NewJWTIssuer(jwtSecret)
 	queries := gen.New(pool)
-	authService := auth.NewService(queries, jwtIssuer, adminEmail)
+
+	// emailSender is constructed before authService (and reused, not
+	// duplicated, by notifyService below) since Phase 1 auth's
+	// post-Phase-10 password-reset/email-verification addition sends
+	// directly through it, independent of Phase 7's notification_outbox —
+	// see internal/auth/password_reset.go's doc comment for why.
+	emailSender := notify.NewResendEmailSender(http.DefaultClient, resendBaseURL, resendAPIKey, resendFromEmail)
+	authService := auth.NewService(queries, pool, jwtIssuer, adminEmail, auth.WithEmailSender(emailSender), auth.WithWebBaseURL(webBaseURL))
 	cfbdClient := schedule.NewCFBDClient(http.DefaultClient, cfbdBaseURL, cfbdAPIKey)
 	scheduleService := schedule.NewService(queries, cfbdClient)
 	picksService := picks.NewService(queries, pool)
@@ -142,7 +159,6 @@ func main() {
 	// survived/mass_wipeout/buyback notifications, called directly from
 	// the real grading/buy-back pipelines, not a parallel/duplicate check.
 	pushSender := notify.NewExpoPushSender(http.DefaultClient, expoPushBaseURL, expoAccessToken)
-	emailSender := notify.NewResendEmailSender(http.DefaultClient, resendBaseURL, resendAPIKey, resendFromEmail)
 	notifyService := notify.NewService(queries, pool, pushSender, emailSender)
 
 	leaguesService := leagues.NewService(queries, pool, leagues.WithNotifier(notifyService))

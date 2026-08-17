@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/sdeitte/survivor-league-api/internal/auth"
+	"github.com/sdeitte/survivor-league-api/internal/db"
 )
 
 func (a *API) handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -114,4 +115,96 @@ func (a *API) handleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	a.clearRefreshCookie(w)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- Password reset / email verification (post-Phase-10 addition) ---
+
+// handleForgotPassword ALWAYS responds 202 with the exact same body
+// regardless of whether req.Email matches an account — per the API
+// contract, this endpoint must not leak account existence via response
+// differences. The actual found/not-found branching happens entirely
+// inside auth.Service.RequestPasswordReset; a genuine infrastructure
+// error from it is logged but still doesn't change the response.
+func (a *API) handleForgotPassword(w http.ResponseWriter, r *http.Request) {
+	var req forgotPasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := a.authService.RequestPasswordReset(r.Context(), req.Email); err != nil {
+		log.Printf("forgot-password: %v", err)
+	}
+
+	writeJSON(w, http.StatusAccepted, messageResponse{
+		Message: "If an account exists for that email, a password reset link has been sent.",
+	})
+}
+
+func (a *API) handleResetPassword(w http.ResponseWriter, r *http.Request) {
+	var req resetPasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if !validatePassword(req.NewPassword) {
+		writeError(w, http.StatusBadRequest, "password must be at least 8 characters")
+		return
+	}
+
+	if err := a.authService.ResetPassword(r.Context(), req.Token, req.NewPassword); err != nil {
+		if errors.Is(err, auth.ErrInvalidResetToken) {
+			writeError(w, http.StatusBadRequest, "invalid or expired token")
+			return
+		}
+		log.Printf("reset-password: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to reset password")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, messageResponse{Message: "Password updated. Please log in again."})
+}
+
+func (a *API) handleVerifyEmail(w http.ResponseWriter, r *http.Request) {
+	var req verifyEmailRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := a.authService.VerifyEmail(r.Context(), req.Token); err != nil {
+		if errors.Is(err, auth.ErrInvalidVerificationToken) {
+			writeError(w, http.StatusBadRequest, "invalid or expired token")
+			return
+		}
+		log.Printf("verify-email: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to verify email")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, messageResponse{Message: "Email verified."})
+}
+
+// handleResendVerification requires auth (unlike forgot-password, which is
+// inherently for logged-out users) — resending is something only the
+// signed-in owner of the account can trigger.
+func (a *API) handleResendVerification(w http.ResponseWriter, r *http.Request) {
+	ac, ok := AuthFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	userID, err := db.ParseUUID(ac.UserID)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	if err := a.authService.ResendVerification(r.Context(), userID); err != nil {
+		log.Printf("resend-verification: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to resend verification email")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, messageResponse{Message: "Verification email sent."})
 }

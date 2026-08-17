@@ -35,6 +35,7 @@ See the full plan: `/Users/sdeitte/.claude/plans/witty-questing-barto.md`.
 | `APP_ENV`              | no       | `development`            | `development` \| `production`. Gates the refresh-token cookie's `Secure` flag (local dev over http can't set `Secure` cookies). |
 | `ADMIN_EMAIL`          | no       | unset                    | If set, a `POST /auth/register` whose `email` case-insensitively matches this gets `is_site_admin=true` auto-set — the site-admin bootstrap path (no manual DB surgery needed). |
 | `CORS_ALLOWED_ORIGIN`  | no       | `http://localhost:5173`  | Single exact origin allowed to call the API with credentials (cookies). Wildcards don't work with `credentials: 'include'` per browser spec. |
+| `WEB_BASE_URL`         | no       | `http://localhost:5173`  | Frontend origin used to build password-reset/email-verification links (`{WEB_BASE_URL}/reset-password?token=...`, `{WEB_BASE_URL}/verify-email?token=...`) — see the post-Phase-10 addition below and `internal/auth/password_reset.go`. |
 | `PORT`                 | no       | `8080`                   | HTTP port the server listens on |
 | `CFBD_API_KEY`         | no*      | unset                    | Bearer token for CollegeFootballData.com. *Required for a real schedule sync to succeed — without it, `POST /admin/sync/schedule` and the daily cron job still run and record a `sync_runs` row, but the CFBD call itself fails with 401. No live key exists in this repo/environment yet (the old hardcoded key was rotated/abandoned, not carried forward) — see api/internal/schedule's doc comments. |
 | `CFBD_BASE_URL`        | no       | `https://api.collegefootballdata.com` | Override to point the server at a mock CFBD server (e.g. for local E2E testing without a real API key). |
@@ -74,6 +75,46 @@ notifications_log, refresh_tokens, audit_log, sync_runs) — see the plan's
 `00003_notification_outbox.sql` (Phase 7) adds notification_outbox, the
 pending-work queue the dispatcher drains — distinct from
 notifications_log, which is the sent/audit record.
+`00004_password_reset_and_email_verification.sql` (post-Phase-10 addition)
+adds `users.email_verified_at` plus `password_reset_tokens` and
+`email_verification_tokens` — both follow `refresh_tokens`' exact
+hashed-token, single-use shape.
+
+## Password reset & email verification (post-Phase-10 addition)
+
+Deferred out of Phase 1 ("no email provider existed yet") and never
+scheduled elsewhere in the 10-phase roadmap; added now that Phase 7 has a
+real `EmailSender` (`internal/notify`) to send through. Lives in
+`internal/auth/password_reset.go`, reusing Phase 1's `Service` rather than
+a new package.
+
+- `POST /auth/forgot-password` — public, always 202 with an identical
+  response body regardless of whether the email matches an account (no
+  account-existence leak). Sends via the configured `EmailSender` in a
+  detached goroutine so the response never waits on the outbound network
+  call (see the file's doc comment for the timing-symmetry reasoning).
+- `POST /auth/reset-password` — public, proven by token possession. On
+  success: hashes the new password with the same argon2id helper
+  Register/Login use, marks the token used, and revokes **every** refresh
+  token the user holds (kills all other active sessions) — all in one
+  transaction.
+- `POST /auth/verify-email` — public, sets `users.email_verified_at`.
+- `POST /auth/resend-verification` — requires auth. No-op (200) if already
+  verified; otherwise supersedes any prior unused verification token and
+  sends a fresh one.
+- `POST /auth/register` now also sends a verification email as a side
+  effect (same code path as resend-verification) — this is **not** a login
+  gate: registration still auto-issues tokens immediately, and an
+  unverified user can fully use the app.
+
+Deliberately **not** routed through Phase 7's `notification_outbox` — that
+queue (20s poll interval) is built for game-event notifications, the wrong
+fit for a transactional flow the user is actively waiting on ("check your
+email").
+
+`GET /me` (and every other endpoint returning a `User`) now includes
+`email_verified_at` (`null` until verified) so clients can show a
+verify-email prompt.
 
 ## Database access (sqlc)
 

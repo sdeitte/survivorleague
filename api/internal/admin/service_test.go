@@ -244,7 +244,7 @@ func newResyncTestEnv(t *testing.T) resyncTestEnv {
 	leaguesService := leagues.NewService(q, pool)
 	picksService := picks.NewService(q, pool)
 	jwtIssuer := auth.NewJWTIssuer("test-secret")
-	authService := auth.NewService(q, jwtIssuer, "")
+	authService := auth.NewService(q, pool, jwtIssuer, "")
 
 	return resyncTestEnv{
 		admin:        adminService,

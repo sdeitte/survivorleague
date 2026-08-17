@@ -21,3 +21,12 @@ WHERE id = sqlc.arg(id) AND revoked_at IS NULL;
 UPDATE refresh_tokens
 SET revoked_at = now()
 WHERE token_hash = sqlc.arg(token_hash) AND revoked_at IS NULL;
+
+-- name: RevokeAllRefreshTokensForUser :exec
+-- Backs POST /auth/reset-password's "kill all other active sessions"
+-- requirement: a successful password reset revokes every refresh token
+-- the user currently holds (reset-password doesn't even take a refresh
+-- token as input — this isn't scoped to "the one used to get here").
+UPDATE refresh_tokens
+SET revoked_at = now()
+WHERE user_id = sqlc.arg(user_id) AND revoked_at IS NULL;

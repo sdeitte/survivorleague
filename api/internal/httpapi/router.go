@@ -86,6 +86,15 @@ func NewRouter(d Deps) http.Handler {
 		r.Post("/login", a.handleLogin)
 		r.Post("/refresh", a.handleRefresh)
 		r.Post("/logout", a.handleLogout)
+		// Post-Phase-10 addition: password reset + email verification.
+		// forgot/reset/verify are public (forgot-password is inherently
+		// for logged-out users; reset/verify are proven by possession of
+		// the emailed token, not a session). resend-verification requires
+		// auth — only the signed-in account owner can trigger it.
+		r.Post("/forgot-password", a.handleForgotPassword)
+		r.Post("/reset-password", a.handleResetPassword)
+		r.Post("/verify-email", a.handleVerifyEmail)
+		r.With(a.RequireAuth).Post("/resend-verification", a.handleResendVerification)
 	})
 
 	r.With(a.RequireAuth).Get("/me", a.handleGetMe)

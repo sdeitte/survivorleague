@@ -5,6 +5,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import { LoginScreen } from './screens/LoginScreen';
 import { RegisterScreen } from './screens/RegisterScreen';
+import { ForgotPasswordScreen } from './screens/ForgotPasswordScreen';
+import { ResetPasswordScreen } from './screens/ResetPasswordScreen';
 import { HealthScreen } from './screens/HealthScreen';
 import { MyLeaguesScreen } from './screens/MyLeaguesScreen';
 import { CreateLeagueScreen } from './screens/CreateLeagueScreen';
@@ -25,6 +27,8 @@ const queryClient = new QueryClient();
 type Screen =
   | { name: 'login' }
   | { name: 'register' }
+  | { name: 'forgotPassword' }
+  | { name: 'resetPassword' }
   | { name: 'health' }
   | { name: 'myLeagues' }
   | { name: 'createLeague' }
@@ -54,11 +58,31 @@ function Root() {
   }
 
   if (!user) {
-    return screen.name === 'register' ? (
-      <RegisterScreen onNavigateToLogin={() => setScreen({ name: 'login' })} />
-    ) : (
-      <LoginScreen onNavigateToRegister={() => setScreen({ name: 'register' })} />
-    );
+    switch (screen.name) {
+      case 'register':
+        return <RegisterScreen onNavigateToLogin={() => setScreen({ name: 'login' })} />;
+      case 'forgotPassword':
+        return (
+          <ForgotPasswordScreen
+            onNavigateToResetPassword={() => setScreen({ name: 'resetPassword' })}
+            onNavigateToLogin={() => setScreen({ name: 'login' })}
+          />
+        );
+      case 'resetPassword':
+        return (
+          <ResetPasswordScreen
+            onSucceeded={() => setScreen({ name: 'login' })}
+            onNavigateToLogin={() => setScreen({ name: 'login' })}
+          />
+        );
+      default:
+        return (
+          <LoginScreen
+            onNavigateToRegister={() => setScreen({ name: 'register' })}
+            onNavigateToForgotPassword={() => setScreen({ name: 'forgotPassword' })}
+          />
+        );
+    }
   }
 
   switch (screen.name) {

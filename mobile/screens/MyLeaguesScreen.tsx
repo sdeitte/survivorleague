@@ -1,8 +1,55 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useAuth } from '../auth/AuthContext';
 import * as api from '../api';
 import type { League } from '../api';
+import { ApiError } from '../api';
+
+// Shown when the signed-in user's /me response has email_verified_at:
+// null. There's no real email delivery to click through in this
+// environment (and no deep-linking infra either — see
+// ResetPasswordScreen's doc comment for the same limitation applied to
+// reset tokens), so a resend button is the full extent of this UI — see
+// api/internal/auth/password_reset.go for the backend side.
+function VerifyEmailBanner() {
+  const { authFetch } = useAuth();
+  const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [error, setError] = useState<string | null>(null);
+
+  const onResend = async () => {
+    setStatus('sending');
+    setError(null);
+    try {
+      await authFetch((token) => api.resendVerification(token));
+      setStatus('sent');
+    } catch (err) {
+      setStatus('error');
+      setError(err instanceof ApiError ? err.message : 'Failed to send verification email.');
+    }
+  };
+
+  return (
+    <View style={styles.verifyBanner}>
+      <Text style={styles.verifyTitle}>Verify your email address</Text>
+      <Text style={styles.verifySubtitle}>
+        {status === 'sent'
+          ? 'Verification email sent — check your inbox.'
+          : "We sent a verification link when you signed up. Didn't get it?"}
+      </Text>
+      {error && <Text style={styles.error}>{error}</Text>}
+      <Pressable
+        style={[styles.verifyButton, (status === 'sending' || status === 'sent') && styles.buttonDisabled]}
+        onPress={() => void onResend()}
+        disabled={status === 'sending' || status === 'sent'}
+      >
+        <Text style={styles.verifyButtonText}>
+          {status === 'sending' ? 'Sending…' : status === 'sent' ? 'Sent' : 'Resend email'}
+        </Text>
+      </Pressable>
+    </View>
+  );
+}
 
 // "My Leagues" — the main authenticated screen (Phase 2 replaces Phase 1's
 // GET-/me-proving HomeScreen with the real landing view): leagues the
@@ -42,6 +89,8 @@ export function MyLeaguesScreen({
           <Text style={styles.link}>Log out</Text>
         </Pressable>
       </View>
+
+      {user && user.email_verified_at === null && <VerifyEmailBanner />}
 
       <View style={styles.actionsRow}>
         <Pressable style={[styles.button, styles.actionButton]} onPress={onNavigateToCreate}>
@@ -123,6 +172,40 @@ const styles = StyleSheet.create({
     color: '#94a3b8',
     fontSize: 13,
     marginTop: 2,
+  },
+  verifyBanner: {
+    borderWidth: 1,
+    borderColor: '#92400e',
+    backgroundColor: '#451a03',
+    borderRadius: 10,
+    padding: 12,
+    gap: 6,
+  },
+  verifyTitle: {
+    color: '#fcd34d',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  verifySubtitle: {
+    color: '#fbbf24',
+    fontSize: 12,
+  },
+  verifyButton: {
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: '#b45309',
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    marginTop: 2,
+  },
+  verifyButtonText: {
+    color: '#fcd34d',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  buttonDisabled: {
+    opacity: 0.5,
   },
   actionsRow: {
     flexDirection: 'row',

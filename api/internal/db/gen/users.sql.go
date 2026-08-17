@@ -25,7 +25,7 @@ func (q *Queries) CountUsersAdmin(ctx context.Context) (int64, error) {
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (email, password_hash, display_name, is_site_admin)
 VALUES (lower($1), $2, $3, $4)
-RETURNING id, email, password_hash, display_name, is_site_admin, status, created_at, updated_at
+RETURNING id, email, password_hash, display_name, is_site_admin, status, created_at, updated_at, email_verified_at
 `
 
 type CreateUserParams struct {
@@ -52,12 +52,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EmailVerifiedAt,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, display_name, is_site_admin, status, created_at, updated_at FROM users WHERE email = lower($1)
+SELECT id, email, password_hash, display_name, is_site_admin, status, created_at, updated_at, email_verified_at FROM users WHERE email = lower($1)
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -72,12 +73,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EmailVerifiedAt,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, password_hash, display_name, is_site_admin, status, created_at, updated_at FROM users WHERE id = $1
+SELECT id, email, password_hash, display_name, is_site_admin, status, created_at, updated_at, email_verified_at FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error) {
@@ -92,6 +94,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EmailVerifiedAt,
 	)
 	return i, err
 }
@@ -153,11 +156,36 @@ func (q *Queries) ListUsersAdmin(ctx context.Context, arg ListUsersAdminParams) 
 	return items, nil
 }
 
+const markUserEmailVerified = `-- name: MarkUserEmailVerified :one
+UPDATE users
+SET email_verified_at = now(), updated_at = now()
+WHERE id = $1
+RETURNING id, email, password_hash, display_name, is_site_admin, status, created_at, updated_at, email_verified_at
+`
+
+// Backs POST /auth/verify-email.
+func (q *Queries) MarkUserEmailVerified(ctx context.Context, id pgtype.UUID) (User, error) {
+	row := q.db.QueryRow(ctx, markUserEmailVerified, id)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.IsSiteAdmin,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.EmailVerifiedAt,
+	)
+	return i, err
+}
+
 const updateUserDisplayName = `-- name: UpdateUserDisplayName :one
 UPDATE users
 SET display_name = $1, updated_at = now()
 WHERE id = $2
-RETURNING id, email, password_hash, display_name, is_site_admin, status, created_at, updated_at
+RETURNING id, email, password_hash, display_name, is_site_admin, status, created_at, updated_at, email_verified_at
 `
 
 type UpdateUserDisplayNameParams struct {
@@ -177,6 +205,39 @@ func (q *Queries) UpdateUserDisplayName(ctx context.Context, arg UpdateUserDispl
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EmailVerifiedAt,
+	)
+	return i, err
+}
+
+const updateUserPasswordHash = `-- name: UpdateUserPasswordHash :one
+UPDATE users
+SET password_hash = $1, updated_at = now()
+WHERE id = $2
+RETURNING id, email, password_hash, display_name, is_site_admin, status, created_at, updated_at, email_verified_at
+`
+
+type UpdateUserPasswordHashParams struct {
+	PasswordHash string      `json:"password_hash"`
+	ID           pgtype.UUID `json:"id"`
+}
+
+// Backs POST /auth/reset-password. The caller (internal/auth.Service.
+// ResetPassword) computes password_hash via the same argon2id
+// HashPassword helper Register uses — this query just persists it.
+func (q *Queries) UpdateUserPasswordHash(ctx context.Context, arg UpdateUserPasswordHashParams) (User, error) {
+	row := q.db.QueryRow(ctx, updateUserPasswordHash, arg.PasswordHash, arg.ID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.IsSiteAdmin,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.EmailVerifiedAt,
 	)
 	return i, err
 }
@@ -185,7 +246,7 @@ const updateUserStatus = `-- name: UpdateUserStatus :one
 UPDATE users
 SET status = $1, updated_at = now()
 WHERE id = $2
-RETURNING id, email, password_hash, display_name, is_site_admin, status, created_at, updated_at
+RETURNING id, email, password_hash, display_name, is_site_admin, status, created_at, updated_at, email_verified_at
 `
 
 type UpdateUserStatusParams struct {
@@ -213,6 +274,7 @@ func (q *Queries) UpdateUserStatus(ctx context.Context, arg UpdateUserStatusPara
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EmailVerifiedAt,
 	)
 	return i, err
 }

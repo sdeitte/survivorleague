@@ -29,6 +29,22 @@ SET status = sqlc.arg(status), updated_at = now()
 WHERE id = sqlc.arg(id)
 RETURNING *;
 
+-- name: UpdateUserPasswordHash :one
+-- Backs POST /auth/reset-password. The caller (internal/auth.Service.
+-- ResetPassword) computes password_hash via the same argon2id
+-- HashPassword helper Register uses — this query just persists it.
+UPDATE users
+SET password_hash = sqlc.arg(password_hash), updated_at = now()
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: MarkUserEmailVerified :one
+-- Backs POST /auth/verify-email.
+UPDATE users
+SET email_verified_at = now(), updated_at = now()
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
 -- name: ListUsersAdmin :many
 -- Backs GET /admin/users (Phase 8, requireSiteAdmin) — every user in the
 -- system, not scoped to the requester (unlike every other user-facing

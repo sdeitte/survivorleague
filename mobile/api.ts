@@ -23,6 +23,9 @@ export interface User {
   email: string;
   display_name: string;
   is_site_admin: boolean;
+  // null until POST /auth/verify-email succeeds for this user
+  // (post-Phase-10 addition) — see the forgot/reset/verify functions below.
+  email_verified_at: string | null;
 }
 
 // --- Admin (Phase 8) ---
@@ -339,6 +342,44 @@ export async function logout(refreshToken: string | null): Promise<void> {
 export async function getMe(accessToken: string): Promise<User> {
   const res = await rawFetch('/me', { accessToken });
   return parseJsonOrThrow<User>(res);
+}
+
+// --- Password reset / email verification (post-Phase-10 addition) ---
+//
+// Sent directly through the API's EmailSender, independent of Phase 7's
+// notification_outbox — see api/internal/auth/password_reset.go. Mobile
+// has no deep-linking set up yet, so the reset/verify screens ask the
+// user to paste the token manually (see ResetPasswordScreen/
+// VerifyEmailBanner) rather than opening a link.
+
+export interface MessageResponse {
+  message: string;
+}
+
+// forgotPassword always resolves with the same message whether or not the
+// email matches an account — the backend intentionally never leaks
+// account existence via this response (POST /auth/forgot-password always
+// 202).
+export async function forgotPassword(email: string): Promise<MessageResponse> {
+  const res = await rawFetch('/auth/forgot-password', { method: 'POST', body: { email } });
+  return parseJsonOrThrow<MessageResponse>(res);
+}
+
+export async function resetPassword(input: { token: string; new_password: string }): Promise<MessageResponse> {
+  const res = await rawFetch('/auth/reset-password', { method: 'POST', body: input });
+  return parseJsonOrThrow<MessageResponse>(res);
+}
+
+export async function verifyEmail(token: string): Promise<MessageResponse> {
+  const res = await rawFetch('/auth/verify-email', { method: 'POST', body: { token } });
+  return parseJsonOrThrow<MessageResponse>(res);
+}
+
+// resendVerification requires auth — unlike forgotPassword, which is
+// inherently for logged-out users.
+export async function resendVerification(accessToken: string): Promise<MessageResponse> {
+  const res = await rawFetch('/auth/resend-verification', { method: 'POST', accessToken });
+  return parseJsonOrThrow<MessageResponse>(res);
 }
 
 export async function updateMe(accessToken: string, input: { display_name: string }): Promise<User> {

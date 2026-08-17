@@ -34,6 +34,41 @@ type userResponse struct {
 	Email       string `json:"email"`
 	DisplayName string `json:"display_name"`
 	IsSiteAdmin bool   `json:"is_site_admin"`
+	// EmailVerifiedAt is null until POST /auth/verify-email succeeds for
+	// this user. Always present (never omitted) so a client can reliably
+	// branch on `email_verified_at === null` to show the verify-email
+	// banner — see the post-Phase-10 password-reset/email-verification
+	// addition.
+	EmailVerifiedAt *string `json:"email_verified_at"`
+}
+
+// --- Password reset / email verification (post-Phase-10 addition) ---
+//
+// Sent directly via internal/notify's EmailSender (internal/auth/
+// password_reset.go), independent of Phase 7's notification_outbox — see
+// that file's doc comment.
+
+type forgotPasswordRequest struct {
+	Email string `json:"email"`
+}
+
+// messageResponse backs every one of this addition's success responses
+// (forgot-password, reset-password, verify-email, resend-verification) —
+// forgot-password/reset-password/verify-email deliberately share this
+// exact shape (not per-endpoint schemas) so, per the API contract,
+// forgot-password's found/not-found cases are byte-for-byte
+// indistinguishable in the response body.
+type messageResponse struct {
+	Message string `json:"message"`
+}
+
+type resetPasswordRequest struct {
+	Token       string `json:"token"`
+	NewPassword string `json:"new_password"`
+}
+
+type verifyEmailRequest struct {
+	Token string `json:"token"`
 }
 
 // sessionResponse covers all three token-issuing endpoints. RefreshToken
@@ -51,12 +86,17 @@ type sessionResponse struct {
 }
 
 func toUserResponse(u gen.User) userResponse {
-	return userResponse{
+	resp := userResponse{
 		ID:          db.UUIDString(u.ID),
 		Email:       u.Email,
 		DisplayName: u.DisplayName,
 		IsSiteAdmin: u.IsSiteAdmin,
 	}
+	if u.EmailVerifiedAt.Valid {
+		ts := formatTimestamp(u.EmailVerifiedAt)
+		resp.EmailVerifiedAt = &ts
+	}
+	return resp
 }
 
 func formatTimestamp(t pgtype.Timestamptz) string {

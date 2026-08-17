@@ -27,8 +27,16 @@ info:
     single-game CFBD resync (the direct unblock mechanism for a game left
     postponed/canceled by the grading pipeline), and the audit log viewer
     (GET /admin/audit-log) — on top of Phase 3's schedule-sync trigger and
-    history endpoints.
-  version: 0.8.0
+    history endpoints. A post-Phase-10 addition (the 10-phase roadmap
+    ended at Phase 10 "launch readiness") adds password reset
+    (forgot-password/reset-password) and email verification
+    (verify-email/resend-verification) — both explicitly deferred out of
+    Phase 1 pending a working email provider, unblocked now that Phase 7
+    built one (internal/notify). Sent directly via the configured
+    EmailSender, independent of Phase 7's notification_outbox dispatcher.
+    Not a login gate: registration still auto-issues tokens immediately;
+    `User.email_verified_at` is informational.
+  version: 0.9.0
 servers:
   - url: http://localhost:8080
     description: Local development
@@ -220,6 +228,143 @@ paths:
               description: Clears the `refresh_token` cookie.
               schema:
                 type: string
+
+  /auth/forgot-password:
+    post:
+      operationId: forgotPassword
+      summary: Request a password reset email
+      description: >
+        Post-Phase-10 addition (deferred out of Phase 1 pending a working
+        email provider). ALWAYS responds 202 with the exact same body,
+        whether or not `email` matches an account — this endpoint must
+        never leak account existence via response differences. If a match
+        is found, a password reset token is generated (hashed at rest,
+        1-hour expiry, single-use — same shape as a refresh token) and
+        emailed via the configured EmailSender (Resend) as a link of the
+        form `{WEB_BASE_URL}/reset-password?token=...`. Sent directly, not
+        via the notification_outbox dispatcher (see internal/auth/
+        password_reset.go for why).
+      security: []
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ForgotPasswordRequest"
+      responses:
+        "202":
+          description: >
+            Always returned, regardless of whether the email matched an
+            account.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /auth/reset-password:
+    post:
+      operationId: resetPassword
+      summary: Reset a password using a token from a forgot-password email
+      description: >
+        Validates `token` against a non-expired, non-used
+        password_reset_tokens row. On success: hashes `new_password` with
+        the same argon2id helper Register/Login use, updates the user,
+        marks the token used, and revokes every refresh token the user
+        currently holds — a password reset kills all other active
+        sessions. Invalid, expired, and already-used tokens all return the
+        same generic 400 error (undifferentiated on purpose, so the
+        response can't be used to distinguish why a token failed).
+      security: []
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordRequest"
+      responses:
+        "200":
+          description: Password updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: >
+            Invalid request (weak new_password), or an invalid/expired/
+            already-used token — both cases use this same status and a
+            generic message.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/verify-email:
+    post:
+      operationId: verifyEmail
+      summary: Verify an email address using a token from a verification email
+      description: >
+        Validates `token` the same way POST /auth/reset-password does
+        (against email_verification_tokens). On success, sets
+        `users.email_verified_at` and marks the token used. NOT a login
+        gate — an unverified user can fully use the app; this is purely
+        informational/eventual.
+      security: []
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyEmailRequest"
+      responses:
+        "200":
+          description: Email verified
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: >
+            Invalid, expired, or already-used token (undifferentiated,
+            same generic message treatment as POST /auth/reset-password).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/resend-verification:
+    post:
+      operationId: resendVerification
+      summary: Resend the email verification link
+      description: >
+        Requires auth — unlike forgot-password, this is only meaningful
+        for a logged-in user. If the caller's email is already verified,
+        this is a silent no-op (still 200), not an error. Otherwise,
+        invalidates any prior unused verification token for the caller
+        (so at most one is ever valid at a time) and sends a fresh one via
+        the same code path POST /auth/register's automatic first send
+        uses.
+      tags:
+        - Auth
+      responses:
+        "200":
+          description: >
+            Verification email sent (or a no-op, if already verified).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "401":
+          description: Missing, invalid, or expired access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /me:
     get:
@@ -1703,6 +1848,7 @@ components:
         - email
         - display_name
         - is_site_admin
+        - email_verified_at
       properties:
         id:
           type: string
@@ -1714,6 +1860,58 @@ components:
           type: string
         is_site_admin:
           type: boolean
+        email_verified_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: >
+            Post-Phase-10 addition. Null until POST /auth/verify-email
+            succeeds for this user. Always present (never omitted) so a
+            client can reliably branch on `email_verified_at === null` to
+            show a verify-email prompt. NOT a login gate — an unverified
+            user can fully use the app.
+
+    ForgotPasswordRequest:
+      type: object
+      required:
+        - email
+      properties:
+        email:
+          type: string
+          format: email
+
+    MessageResponse:
+      type: object
+      description: >
+        A generic human-readable confirmation. Used by
+        forgot-password/reset-password/verify-email/resend-verification —
+        forgot-password's found and not-found cases deliberately return
+        the exact same message text, not just the same schema.
+      required:
+        - message
+      properties:
+        message:
+          type: string
+
+    ResetPasswordRequest:
+      type: object
+      required:
+        - token
+        - new_password
+      properties:
+        token:
+          type: string
+        new_password:
+          type: string
+          minLength: 8
+
+    VerifyEmailRequest:
+      type: object
+      required:
+        - token
+      properties:
+        token:
+          type: string
 
     RegisterDeviceTokenRequest:
       type: object

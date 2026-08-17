@@ -339,6 +339,41 @@ func TestRouteTable_ScheduleRoutesRequireAuth(t *testing.T) {
 	}
 }
 
+// TestRouteTable_PasswordResetAndEmailVerificationRoutes is the
+// post-Phase-10 extension of the plan's "Auth & RBAC" regression-guard
+// pattern: forgot-password/reset-password/verify-email must stay public
+// (proven by possession of the emailed token, not a session — and
+// forgot-password is inherently for logged-out users), while
+// resend-verification must require auth (only the signed-in account owner
+// can trigger it).
+func TestRouteTable_PasswordResetAndEmailVerificationRoutes(t *testing.T) {
+	entries := walkRoutes(t, buildTestRouter(t))
+
+	checkedPublic := 0
+	checkedAuth := false
+	for _, e := range entries {
+		key := e.method + " " + e.route
+		switch key {
+		case "POST /auth/forgot-password", "POST /auth/reset-password", "POST /auth/verify-email":
+			checkedPublic++
+			if hasMiddleware(e.middlewares, "RequireAuth") {
+				t.Errorf("%s should be public, but requires auth; middlewares=%v", key, e.middlewares)
+			}
+		case "POST /auth/resend-verification":
+			checkedAuth = true
+			if !hasMiddleware(e.middlewares, "RequireAuth") {
+				t.Errorf("%s should require auth; middlewares=%v", key, e.middlewares)
+			}
+		}
+	}
+	if checkedPublic != 3 {
+		t.Errorf("expected to check 3 public auth routes (forgot-password, reset-password, verify-email), checked %d", checkedPublic)
+	}
+	if !checkedAuth {
+		t.Error("POST /auth/resend-verification not found in route table")
+	}
+}
+
 // TestRouteTable_NotificationRoutesRequireAuth is the Phase 7 extension of
 // the plan's "Auth & RBAC" regression-guard pattern: device-token
 // registration and notification preferences are per-user data with no

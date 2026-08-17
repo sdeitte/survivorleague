@@ -1,7 +1,51 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
-import { listLeagues } from '../api'
+import { listLeagues, resendVerification, ApiError } from '../api'
+
+// Shown on the home page for a signed-in user whose /me response has
+// email_verified_at: null. There's no real email delivery to click through
+// in this environment, so a resend button is the full extent of this UI —
+// see api/internal/auth/password_reset.go for the backend side.
+function VerifyEmailBanner() {
+  const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
+  const [error, setError] = useState<string | null>(null)
+
+  const onResend = async () => {
+    setStatus('sending')
+    setError(null)
+    try {
+      await resendVerification()
+      setStatus('sent')
+    } catch (err) {
+      setStatus('error')
+      setError(err instanceof ApiError ? err.message : 'Failed to send verification email.')
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-amber-800/60 bg-amber-950/40 p-4 flex items-center justify-between gap-3">
+      <div>
+        <p className="text-sm text-amber-200 font-medium">Verify your email address</p>
+        <p className="text-xs text-amber-300/80 mt-0.5">
+          {status === 'sent'
+            ? 'Verification email sent — check your inbox.'
+            : "We sent a verification link when you signed up. Didn't get it?"}
+        </p>
+        {error && <p className="text-xs text-red-400 mt-0.5">{error}</p>}
+      </div>
+      <button
+        type="button"
+        onClick={() => void onResend()}
+        disabled={status === 'sending' || status === 'sent'}
+        className="shrink-0 rounded-md border border-amber-700 px-3 py-1.5 text-xs font-medium text-amber-200 disabled:opacity-50"
+      >
+        {status === 'sending' ? 'Sending…' : status === 'sent' ? 'Sent' : 'Resend email'}
+      </button>
+    </div>
+  )
+}
 
 // "My Leagues" — the main authenticated landing page (Phase 2 replaces
 // Phase 1's /me-fetching placeholder with the real home view: leagues the
@@ -28,6 +72,8 @@ export function HomePage() {
             Log out
           </button>
         </div>
+
+        {user && user.email_verified_at === null && <VerifyEmailBanner />}
 
         <div className="flex gap-2">
           <Link

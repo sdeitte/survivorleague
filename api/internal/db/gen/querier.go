@@ -44,8 +44,10 @@ type Querier interface {
 	// plan's Data Model section. league_id/target_type/target_id are nullable
 	// (e.g. a schedule_sync action has no league scope).
 	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) (AuditLog, error)
+	CreateEmailVerificationToken(ctx context.Context, arg CreateEmailVerificationTokenParams) (EmailVerificationToken, error)
 	CreateLeague(ctx context.Context, arg CreateLeagueParams) (League, error)
 	CreateLeagueMembership(ctx context.Context, arg CreateLeagueMembershipParams) (LeagueMembership, error)
+	CreatePasswordResetToken(ctx context.Context, arg CreatePasswordResetTokenParams) (PasswordResetToken, error)
 	CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) (RefreshToken, error)
 	// Started at insert time (status='running'); FinishSyncRun closes it out.
 	// Two-phase rather than a single post-hoc insert so a crash mid-sync
@@ -69,6 +71,18 @@ type Querier interface {
 	// rows returned = already enqueued", not an error.
 	EnqueueNotification(ctx context.Context, arg EnqueueNotificationParams) (NotificationOutbox, error)
 	FinishSyncRun(ctx context.Context, arg FinishSyncRunParams) (SyncRun, error)
+	// Active = not used and not expired — see
+	// GetActivePasswordResetTokenByHash's comment in password_reset_tokens.sql
+	// for why "no rows" stays undifferentiated all the way out to the API
+	// response.
+	GetActiveEmailVerificationTokenByHash(ctx context.Context, tokenHash string) (EmailVerificationToken, error)
+	// Active = not used and not expired. Callers should treat "no rows" as
+	// "invalid or expired token" without distinguishing why, to avoid leaking
+	// timing/existence information — mirrors GetActiveRefreshTokenByHash's own
+	// comment in refresh_tokens.sql. This is what backs POST
+	// /auth/reset-password and /auth/verify-email's single generic error
+	// message for invalid/expired/already-used tokens.
+	GetActivePasswordResetTokenByHash(ctx context.Context, tokenHash string) (PasswordResetToken, error)
 	// Active = not revoked and not expired. Callers should treat "no rows" as
 	// "invalid or already-used token" without distinguishing why, to avoid
 	// leaking timing/existence information.
@@ -161,6 +175,12 @@ type Querier interface {
 	// finalized this, skip". Elimination side effects are only ever applied
 	// by the caller that actually wins this insert.
 	InsertLeagueWeekResultIfAbsent(ctx context.Context, arg InsertLeagueWeekResultIfAbsentParams) (LeagueWeekResult, error)
+	// Called before minting a fresh verification token (registration's
+	// automatic first send, or an explicit POST /auth/resend-verification) so
+	// at most one unused verification token ever exists per user — an old,
+	// un-clicked link stops working the moment a newer one is issued instead
+	// of leaving multiple simultaneously-valid tokens outstanding.
+	InvalidatePendingEmailVerificationTokens(ctx context.Context, userID pgtype.UUID) error
 	LeagueInviteCodeExists(ctx context.Context, inviteCode string) (bool, error)
 	// Every membership that actually participates in grading/elimination:
 	// status='active' (not already eliminated), is_contestant=true (a
@@ -259,6 +279,10 @@ type Querier interface {
 	// user in zero leagues still gets one output row.
 	ListUsersAdmin(ctx context.Context, arg ListUsersAdminParams) ([]ListUsersAdminRow, error)
 	ListWeeksBySeasonYear(ctx context.Context, seasonYear int32) ([]Week, error)
+	// Conditioned on used_at IS NULL so a concurrent replay of the same token
+	// loses the race cleanly (RETURNING zero rows -> pgx.ErrNoRows), same
+	// pattern as MarkPasswordResetTokenUsed.
+	MarkEmailVerificationTokenUsed(ctx context.Context, id pgtype.UUID) (EmailVerificationToken, error)
 	// Sets the graded_at idempotency guard. WHERE graded_at IS NULL is
 	// defensive redundancy on top of the FOR UPDATE row lock above — belt and
 	// suspenders against ever re-grading a game.
@@ -274,17 +298,33 @@ type Querier interface {
 	// tokens) — see internal/notify's dispatch doc comment for why this is
 	// deliberately distinct from 'failed'.
 	MarkNotificationSkipped(ctx context.Context, id pgtype.UUID) error
+	// Conditioned on used_at IS NULL (not just id match) so a concurrent
+	// replay of the same token loses the race cleanly: RETURNING zero rows
+	// (mapped to pgx.ErrNoRows by the caller, same pattern as
+	// BuyBackMembership's race handling) rather than silently double-applying.
+	MarkPasswordResetTokenUsed(ctx context.Context, id pgtype.UUID) (PasswordResetToken, error)
+	// Backs POST /auth/verify-email.
+	MarkUserEmailVerified(ctx context.Context, id pgtype.UUID) (User, error)
 	// Soft-delete: only affects a currently-active (non-removed) row scoped to
 	// the given league, so this doubles as the "membership belongs to this
 	// league and isn't already removed" check — no rows back means 404/400 to
 	// the caller, not an error.
 	RemoveMembership(ctx context.Context, arg RemoveMembershipParams) (LeagueMembership, error)
+	// Backs POST /auth/reset-password's "kill all other active sessions"
+	// requirement: a successful password reset revokes every refresh token
+	// the user currently holds (reset-password doesn't even take a refresh
+	// token as input — this isn't scoped to "the one used to get here").
+	RevokeAllRefreshTokensForUser(ctx context.Context, userID pgtype.UUID) error
 	RevokeRefreshToken(ctx context.Context, id pgtype.UUID) error
 	RevokeRefreshTokenByHash(ctx context.Context, tokenHash string) error
 	UpdateCommissionerIsContestant(ctx context.Context, arg UpdateCommissionerIsContestantParams) (LeagueMembership, error)
 	UpdateLeagueInviteCode(ctx context.Context, arg UpdateLeagueInviteCodeParams) (League, error)
 	UpdateLeagueName(ctx context.Context, arg UpdateLeagueNameParams) (League, error)
 	UpdateUserDisplayName(ctx context.Context, arg UpdateUserDisplayNameParams) (User, error)
+	// Backs POST /auth/reset-password. The caller (internal/auth.Service.
+	// ResetPassword) computes password_hash via the same argon2id
+	// HashPassword helper Register uses — this query just persists it.
+	UpdateUserPasswordHash(ctx context.Context, arg UpdateUserPasswordHashParams) (User, error)
 	// Backs POST /admin/users/:id/disable and .../enable (Phase 8). status is
 	// validated against the app-level enum (active/disabled — see
 	// internal/admin's UserStatus constants) by the caller, not a DB CHECK

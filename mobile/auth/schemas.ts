@@ -16,3 +16,16 @@ export const registerSchema = z.object({
   display_name: z.string().trim().min(1, 'Display name is required'),
 });
 export type RegisterFormValues = z.infer<typeof registerSchema>;
+
+// --- Password reset (post-Phase-10 addition) ---
+
+export const forgotPasswordSchema = z.object({
+  email: z.string().trim().min(1, 'Email is required').email('Enter a valid email address'),
+});
+export type ForgotPasswordFormValues = z.infer<typeof forgotPasswordSchema>;
+
+export const resetPasswordSchema = z.object({
+  token: z.string().trim().min(1, 'Reset token is required'),
+  new_password: z.string().min(8, 'Password must be at least 8 characters'),
+});
+export type ResetPasswordFormValues = z.infer<typeof resetPasswordSchema>;

@@ -61,6 +61,21 @@ func (q *Queries) GetActiveRefreshTokenByHash(ctx context.Context, tokenHash str
 	return i, err
 }
 
+const revokeAllRefreshTokensForUser = `-- name: RevokeAllRefreshTokensForUser :exec
+UPDATE refresh_tokens
+SET revoked_at = now()
+WHERE user_id = $1 AND revoked_at IS NULL
+`
+
+// Backs POST /auth/reset-password's "kill all other active sessions"
+// requirement: a successful password reset revokes every refresh token
+// the user currently holds (reset-password doesn't even take a refresh
+// token as input — this isn't scoped to "the one used to get here").
+func (q *Queries) RevokeAllRefreshTokensForUser(ctx context.Context, userID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, revokeAllRefreshTokensForUser, userID)
+	return err
+}
+
 const revokeRefreshToken = `-- name: RevokeRefreshToken :exec
 UPDATE refresh_tokens
 SET revoked_at = now()

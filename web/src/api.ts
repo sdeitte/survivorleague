@@ -22,6 +22,10 @@ export interface User {
   email: string
   display_name: string
   is_site_admin: boolean
+  // null until POST /auth/verify-email succeeds for this user — see
+  // MessageResponse/the forgot-password/reset-password/verify-email
+  // functions below (post-Phase-10 addition).
+  email_verified_at: string | null
 }
 
 // --- Admin (Phase 8) ---
@@ -378,6 +382,39 @@ export async function logout(): Promise<void> {
 
 export async function getMe(): Promise<User> {
   return apiFetch<User>('/me')
+}
+
+// --- Password reset / email verification (post-Phase-10 addition) ---
+//
+// Sent directly through the API's EmailSender, independent of Phase 7's
+// notification_outbox — see api/internal/auth/password_reset.go.
+
+export interface MessageResponse {
+  message: string
+}
+
+// forgotPassword always resolves with the same message whether or not the
+// email matches an account — the backend intentionally never leaks account
+// existence via this response (POST /auth/forgot-password always 202).
+export async function forgotPassword(email: string): Promise<MessageResponse> {
+  const res = await rawFetch('/auth/forgot-password', { method: 'POST', body: { email }, skipAuthRetry: true })
+  return parseJsonOrThrow<MessageResponse>(res)
+}
+
+export async function resetPassword(input: { token: string; new_password: string }): Promise<MessageResponse> {
+  const res = await rawFetch('/auth/reset-password', { method: 'POST', body: input, skipAuthRetry: true })
+  return parseJsonOrThrow<MessageResponse>(res)
+}
+
+export async function verifyEmail(token: string): Promise<MessageResponse> {
+  const res = await rawFetch('/auth/verify-email', { method: 'POST', body: { token }, skipAuthRetry: true })
+  return parseJsonOrThrow<MessageResponse>(res)
+}
+
+// resendVerification requires auth — unlike forgotPassword, which is
+// inherently for logged-out users.
+export async function resendVerification(): Promise<MessageResponse> {
+  return apiFetch<MessageResponse>('/auth/resend-verification', { method: 'POST' })
 }
 
 export async function updateMe(input: { display_name: string }): Promise<User> {
