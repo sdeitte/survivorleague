@@ -7,6 +7,7 @@ import { LoginPage } from './routes/LoginPage'
 import { RegisterPage } from './routes/RegisterPage'
 import { ForgotPasswordPage } from './routes/ForgotPasswordPage'
 import { ResetPasswordPage } from './routes/ResetPasswordPage'
+import { VerifyEmailPage } from './routes/VerifyEmailPage'
 import { HealthCheckPage } from './routes/HealthCheckPage'
 import { CreateLeaguePage } from './routes/CreateLeaguePage'
 import { JoinLeaguePage } from './routes/JoinLeaguePage'
@@ -30,6 +31,7 @@ function App() {
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/verify-email" element={<VerifyEmailPage />} />
         <Route path="/health" element={<HealthCheckPage />} />
         <Route
           path="/"
