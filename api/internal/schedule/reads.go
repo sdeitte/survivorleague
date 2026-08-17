@@ -17,6 +17,12 @@ var ErrWeekNotFound = errors.New("schedule: week not found")
 // ErrGameNotFound is returned by GetGameByID when no game matches.
 var ErrGameNotFound = errors.New("schedule: game not found")
 
+// ErrGameNotFoundInCFBD is returned by RefreshGame when the game's
+// season/week no longer contains a CFBD game with this game's external_id
+// — a CFBD-side data issue (or a genuinely wrong external_id), not
+// something a resync can resolve.
+var ErrGameNotFoundInCFBD = errors.New("schedule: game not found in CFBD response for its week")
+
 // ListWeeksBySeasonYear lists a season's weeks, ordered by week_number.
 // Backs GET /weeks?season_year=.
 func (s *Service) ListWeeksBySeasonYear(ctx context.Context, seasonYear int32) ([]gen.Week, error) {

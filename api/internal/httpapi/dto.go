@@ -498,3 +498,174 @@ func toSyncRunResponse(r gen.SyncRun) syncRunResponse {
 	}
 	return resp
 }
+
+// --- Admin (Phase 8) ---
+
+// paginationResponse is embedded in every paginated admin list response.
+type paginationResponse struct {
+	Total  int64 `json:"total"`
+	Limit  int32 `json:"limit"`
+	Offset int32 `json:"offset"`
+}
+
+// adminCommissionerResponse is the trimmed commissioner identity embedded
+// in adminLeagueResponse — id/display_name/email, per the API contract.
+type adminCommissionerResponse struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name"`
+	Email       string `json:"email"`
+}
+
+// adminLeagueResponse is one row of GET /admin/leagues — every league in
+// the system, unscoped to the requester (unlike leagueResponse, which
+// always carries the requester's own membership).
+type adminLeagueResponse struct {
+	ID           string                    `json:"id"`
+	Name         string                    `json:"name"`
+	Conference   string                    `json:"conference"`
+	SeasonYear   int32                     `json:"season_year"`
+	Status       string                    `json:"status"`
+	Commissioner adminCommissionerResponse `json:"commissioner"`
+	MemberCount  int64                     `json:"member_count"`
+	CreatedAt    string                    `json:"created_at"`
+}
+
+func toAdminLeagueResponse(row gen.ListLeaguesAdminRow) adminLeagueResponse {
+	return adminLeagueResponse{
+		ID:         db.UUIDString(row.ID),
+		Name:       row.Name,
+		Conference: row.Conference,
+		SeasonYear: row.SeasonYear,
+		Status:     row.Status,
+		Commissioner: adminCommissionerResponse{
+			ID:          db.UUIDString(row.CommissionerUserID),
+			DisplayName: row.CommissionerDisplayName,
+			Email:       row.CommissionerEmail,
+		},
+		MemberCount: row.MemberCount,
+		CreatedAt:   formatTimestamp(row.CreatedAt),
+	}
+}
+
+type adminLeaguesListResponse struct {
+	Leagues []adminLeagueResponse `json:"leagues"`
+	paginationResponse
+}
+
+// adminUserResponse is one row of GET /admin/users — every user in the
+// system.
+type adminUserResponse struct {
+	ID          string `json:"id"`
+	Email       string `json:"email"`
+	DisplayName string `json:"display_name"`
+	IsSiteAdmin bool   `json:"is_site_admin"`
+	Status      string `json:"status"`
+	LeagueCount int64  `json:"league_count"`
+	CreatedAt   string `json:"created_at"`
+}
+
+func toAdminUserResponse(row gen.ListUsersAdminRow) adminUserResponse {
+	return adminUserResponse{
+		ID:          db.UUIDString(row.ID),
+		Email:       row.Email,
+		DisplayName: row.DisplayName,
+		IsSiteAdmin: row.IsSiteAdmin,
+		Status:      row.Status,
+		LeagueCount: row.LeagueCount,
+		CreatedAt:   formatTimestamp(row.CreatedAt),
+	}
+}
+
+type adminUsersListResponse struct {
+	Users []adminUserResponse `json:"users"`
+	paginationResponse
+}
+
+// adminUserDetailResponse is the response of POST /admin/users/:id/disable
+// and .../enable — the updated user record in full (status is the field
+// that just changed).
+type adminUserDetailResponse struct {
+	ID          string `json:"id"`
+	Email       string `json:"email"`
+	DisplayName string `json:"display_name"`
+	IsSiteAdmin bool   `json:"is_site_admin"`
+	Status      string `json:"status"`
+	CreatedAt   string `json:"created_at"`
+}
+
+func toAdminUserDetailResponse(u gen.User) adminUserDetailResponse {
+	return adminUserDetailResponse{
+		ID:          db.UUIDString(u.ID),
+		Email:       u.Email,
+		DisplayName: u.DisplayName,
+		IsSiteAdmin: u.IsSiteAdmin,
+		Status:      u.Status,
+		CreatedAt:   formatTimestamp(u.CreatedAt),
+	}
+}
+
+// finalizedLeagueWeekResponse is one entry of resyncGameResponse's
+// finalized_league_weeks — a league-week that the resync's downstream
+// grading pass actually finalized.
+type finalizedLeagueWeekResponse struct {
+	LeagueID    string `json:"league_id"`
+	WeekID      string `json:"week_id"`
+	MassWipeout bool   `json:"mass_wipeout"`
+}
+
+// resyncGameResponse is the response of POST /admin/games/:id/resync.
+type resyncGameResponse struct {
+	Game                 gameResponse                  `json:"game"`
+	FinalizedLeagueWeeks []finalizedLeagueWeekResponse `json:"finalized_league_weeks"`
+}
+
+// toGameResponsePlain maps a plain (unjoined) gen.Game — as returned by a
+// resync, which has no need for the joined team names GetGameByIDWithTeams
+// carries — to gameResponse. HomeTeam/AwayTeam are left as their bare IDs
+// (Name/Conference/LogoURL empty) since a resync response's caller already
+// knows which teams are playing; a client wanting the full joined shape can
+// follow up with GET /games/:id.
+func toGameResponsePlain(g gen.Game) gameResponse {
+	return gameResponse{
+		ID:           db.UUIDString(g.ID),
+		ExternalID:   g.ExternalID,
+		WeekID:       db.UUIDString(g.WeekID),
+		KickoffAt:    formatTimestamp(g.KickoffAt),
+		Status:       g.Status,
+		HomeTeam:     gameTeamResponse{ID: db.UUIDString(g.HomeTeamID)},
+		AwayTeam:     gameTeamResponse{ID: db.UUIDString(g.AwayTeamID)},
+		HomeScore:    pgInt4Ptr(g.HomeScore),
+		AwayScore:    pgInt4Ptr(g.AwayScore),
+		WinnerTeamID: pgUUIDStringOrEmpty(g.WinnerTeamID),
+	}
+}
+
+// auditLogEntryResponse is one row of GET /admin/audit-log.
+type auditLogEntryResponse struct {
+	ID          string          `json:"id"`
+	ActorUserID string          `json:"actor_user_id,omitempty"`
+	LeagueID    string          `json:"league_id,omitempty"`
+	Action      string          `json:"action"`
+	TargetType  string          `json:"target_type,omitempty"`
+	TargetID    string          `json:"target_id,omitempty"`
+	Metadata    json.RawMessage `json:"metadata"`
+	CreatedAt   string          `json:"created_at"`
+}
+
+func toAuditLogEntryResponse(row gen.AuditLog) auditLogEntryResponse {
+	return auditLogEntryResponse{
+		ID:          db.UUIDString(row.ID),
+		ActorUserID: pgUUIDStringOrEmpty(row.ActorUserID),
+		LeagueID:    pgUUIDStringOrEmpty(row.LeagueID),
+		Action:      row.Action,
+		TargetType:  row.TargetType.String,
+		TargetID:    pgUUIDStringOrEmpty(row.TargetID),
+		Metadata:    json.RawMessage(row.Metadata),
+		CreatedAt:   formatTimestamp(row.CreatedAt),
+	}
+}
+
+type auditLogListResponse struct {
+	Entries []auditLogEntryResponse `json:"entries"`
+	paginationResponse
+}

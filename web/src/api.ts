@@ -24,6 +24,89 @@ export interface User {
   is_site_admin: boolean
 }
 
+// --- Admin (Phase 8) ---
+
+export interface AdminCommissioner {
+  id: string
+  display_name: string
+  email: string
+}
+
+export interface AdminLeague {
+  id: string
+  name: string
+  conference: string
+  season_year: number
+  status: 'active'
+  commissioner: AdminCommissioner
+  member_count: number
+  created_at: string
+}
+
+export interface AdminLeaguesListResponse {
+  leagues: AdminLeague[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface AdminUser {
+  id: string
+  email: string
+  display_name: string
+  is_site_admin: boolean
+  status: 'active' | 'disabled'
+  league_count: number
+  created_at: string
+}
+
+export interface AdminUsersListResponse {
+  users: AdminUser[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface FinalizedLeagueWeek {
+  league_id: string
+  week_id: string
+  mass_wipeout: boolean
+}
+
+export interface ResyncGameResponse {
+  game: Game
+  finalized_league_weeks: FinalizedLeagueWeek[]
+}
+
+export interface AuditLogEntry {
+  id: string
+  actor_user_id?: string
+  league_id?: string
+  action: string
+  target_type?: string
+  target_id?: string
+  metadata: Record<string, unknown>
+  created_at: string
+}
+
+export interface AuditLogListResponse {
+  entries: AuditLogEntry[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface SyncRun {
+  id: string
+  kind: 'schedule'
+  status: 'running' | 'success' | 'failed'
+  started_at: string
+  finished_at?: string
+  error?: string
+  details: Record<string, unknown>
+  created_at: string
+}
+
 export interface SessionResponse {
   access_token: string
   refresh_token?: string
@@ -364,6 +447,13 @@ export async function listWeeks(seasonYear: number): Promise<Week[]> {
   return apiFetch<Week[]>(`/weeks?season_year=${seasonYear}`)
 }
 
+// listWeekGames backs the admin "resync a game" picker (Phase 8) — lets an
+// admin browse a week's games (with status) rather than needing to already
+// know a game's internal UUID.
+export async function listWeekGames(weekId: string): Promise<Game[]> {
+  return apiFetch<Game[]>(`/weeks/${weekId}/games`)
+}
+
 // Returns null (rather than throwing) on a 404 — "no pick for this week
 // yet" is an expected, common state, not an error condition for callers.
 export async function getMyPick(leagueId: string, weekId: string): Promise<Pick | null> {
@@ -405,4 +495,49 @@ export async function updateNotificationPreferences(
   prefs: NotificationPreferences,
 ): Promise<NotificationPreferences> {
   return apiFetch<NotificationPreferences>('/me/notification-preferences', { method: 'PUT', body: prefs })
+}
+
+// --- Admin (Phase 8, plus Phase 3's sync-runs endpoints) ---
+//
+// Client-side gating on user.is_site_admin (see SiteAdminRoute) is UX
+// only — every one of these hits a requireSiteAdmin route, so the real
+// enforcement is server-side regardless of what the UI shows.
+
+export async function triggerScheduleSync(seasonYear: number): Promise<SyncRun> {
+  return apiFetch<SyncRun>('/admin/sync/schedule', { method: 'POST', body: { season_year: seasonYear } })
+}
+
+export async function listSyncRuns(): Promise<SyncRun[]> {
+  return apiFetch<SyncRun[]>('/admin/sync/runs')
+}
+
+export async function listAdminLeagues(limit: number, offset: number): Promise<AdminLeaguesListResponse> {
+  return apiFetch<AdminLeaguesListResponse>(`/admin/leagues?limit=${limit}&offset=${offset}`)
+}
+
+export async function listAdminUsers(limit: number, offset: number): Promise<AdminUsersListResponse> {
+  return apiFetch<AdminUsersListResponse>(`/admin/users?limit=${limit}&offset=${offset}`)
+}
+
+export async function disableUser(userId: string): Promise<AdminUser> {
+  return apiFetch<AdminUser>(`/admin/users/${userId}/disable`, { method: 'POST' })
+}
+
+export async function enableUser(userId: string): Promise<AdminUser> {
+  return apiFetch<AdminUser>(`/admin/users/${userId}/enable`, { method: 'POST' })
+}
+
+export async function resyncGame(gameId: string): Promise<ResyncGameResponse> {
+  return apiFetch<ResyncGameResponse>(`/admin/games/${gameId}/resync`, { method: 'POST' })
+}
+
+export async function listAuditLog(
+  limit: number,
+  offset: number,
+  filters: { action?: string; actor_user_id?: string } = {},
+): Promise<AuditLogListResponse> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  if (filters.action) params.set('action', filters.action)
+  if (filters.actor_user_id) params.set('actor_user_id', filters.actor_user_id)
+  return apiFetch<AuditLogListResponse>(`/admin/audit-log?${params.toString()}`)
 }

@@ -11,6 +11,24 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countAuditLog = `-- name: CountAuditLog :one
+SELECT count(*) FROM audit_log
+WHERE ($1::text IS NULL OR action = $1)
+  AND ($2::uuid IS NULL OR actor_user_id = $2)
+`
+
+type CountAuditLogParams struct {
+	Action      pgtype.Text `json:"action"`
+	ActorUserID pgtype.UUID `json:"actor_user_id"`
+}
+
+func (q *Queries) CountAuditLog(ctx context.Context, arg CountAuditLogParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countAuditLog, arg.Action, arg.ActorUserID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createAuditLog = `-- name: CreateAuditLog :one
 INSERT INTO audit_log (actor_user_id, league_id, action, target_type, target_id, metadata)
 VALUES ($1, $2, $3, $4, $5, $6)
@@ -50,4 +68,57 @@ func (q *Queries) CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) 
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const listAuditLog = `-- name: ListAuditLog :many
+SELECT id, actor_user_id, league_id, action, target_type, target_id, metadata, created_at FROM audit_log
+WHERE ($1::text IS NULL OR action = $1)
+  AND ($2::uuid IS NULL OR actor_user_id = $2)
+ORDER BY created_at DESC, id DESC
+LIMIT $4 OFFSET $3
+`
+
+type ListAuditLogParams struct {
+	Action      pgtype.Text `json:"action"`
+	ActorUserID pgtype.UUID `json:"actor_user_id"`
+	RowOffset   int32       `json:"row_offset"`
+	RowLimit    int32       `json:"row_limit"`
+}
+
+// Backs GET /admin/audit-log (Phase 8, requireSiteAdmin). Newest first,
+// with optional equality filters on action/actor_user_id — both narg so a
+// NULL means "don't filter on this field" (mirrors ListTeams' conference
+// narg pattern in teams.sql).
+func (q *Queries) ListAuditLog(ctx context.Context, arg ListAuditLogParams) ([]AuditLog, error) {
+	rows, err := q.db.Query(ctx, listAuditLog,
+		arg.Action,
+		arg.ActorUserID,
+		arg.RowOffset,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AuditLog{}
+	for rows.Next() {
+		var i AuditLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.ActorUserID,
+			&i.LeagueID,
+			&i.Action,
+			&i.TargetType,
+			&i.TargetID,
+			&i.Metadata,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

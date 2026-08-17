@@ -13,11 +13,15 @@
 // commissioner buy-back endpoint. Phase 7 adds notifications
 // (internal/notify): device tokens/preferences, the notification_outbox
 // dispatcher ticker, and the hourly pick_reminder cron job, wired
-// alongside the existing cron/poll-loop pattern. Route wiring lives in
-// internal/httpapi; this file just reads configuration from the
-// environment, assembles dependencies, and owns process lifecycle (HTTP
-// server + cron scheduler + live poll loop + notification dispatcher, all
-// stopped cleanly on shutdown).
+// alongside the existing cron/poll-loop pattern. Phase 8 completes
+// site-admin (internal/admin): cross-league leagues/users listing, user
+// disable/enable, single-game CFBD resync (reusing internal/grading's
+// GradeGame/TryFinalizeLeagueWeek — the reason adminService is now
+// constructed after gradingService below), and the audit log viewer.
+// Route wiring lives in internal/httpapi; this file just reads
+// configuration from the environment, assembles dependencies, and owns
+// process lifecycle (HTTP server + cron scheduler + live poll loop +
+// notification dispatcher, all stopped cleanly on shutdown).
 package main
 
 import (
@@ -128,7 +132,6 @@ func main() {
 	authService := auth.NewService(queries, jwtIssuer, adminEmail)
 	cfbdClient := schedule.NewCFBDClient(http.DefaultClient, cfbdBaseURL, cfbdAPIKey)
 	scheduleService := schedule.NewService(queries, cfbdClient)
-	adminService := admin.NewService(queries, scheduleService)
 	picksService := picks.NewService(queries, pool)
 
 	// --- Notifications (Phase 7) ---
@@ -144,6 +147,12 @@ func main() {
 
 	leaguesService := leagues.NewService(queries, pool, leagues.WithNotifier(notifyService))
 	gradingService := grading.NewService(queries, pool, grading.WithNotifier(notifyService))
+
+	// adminService is constructed after gradingService (Phase 8's single-
+	// game resync path — POST /admin/games/:id/resync — reuses
+	// grading.Service.GradeGame/TryFinalizeLeagueWeek directly, the same
+	// functions internal/livepoll's poll loop calls).
+	adminService := admin.NewService(queries, scheduleService, gradingService)
 
 	router := httpapi.NewRouter(httpapi.Deps{
 		Pool:              pool,

@@ -22,10 +22,13 @@ info:
     dispatcher, Expo Push/Resend delivery, and the five trigger types —
     pick_reminder, eliminated, survived, mass_wipeout, buyback — are
     internal, internal/notify, not client-facing API surface beyond these
-    two resources). Admin views and the rest of site-admin are added
-    incrementally in later phases per the roadmap — see
-    /Users/sdeitte/.claude/plans/witty-questing-barto.md.
-  version: 0.7.0
+    two resources). Phase 8 completes site-admin: cross-league oversight
+    (GET /admin/leagues, GET /admin/users), user disable/enable, a
+    single-game CFBD resync (the direct unblock mechanism for a game left
+    postponed/canceled by the grading pipeline), and the audit log viewer
+    (GET /admin/audit-log) — on top of Phase 3's schedule-sync trigger and
+    history endpoints.
+  version: 0.8.0
 servers:
   - url: http://localhost:8080
     description: Local development
@@ -1330,12 +1333,300 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /admin/leagues:
+    get:
+      operationId: listAdminLeagues
+      summary: List every league in the system (site admin only)
+      description: >
+        Requires is_site_admin=true (requireSiteAdmin). Unlike GET
+        /leagues, this is not scoped to the requester — every league across
+        the whole system, newest first, each with its commissioner's
+        id/display_name/email and current member count.
+      tags:
+        - Admin
+      parameters:
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageOffset"
+      responses:
+        "200":
+          description: Paginated list of leagues
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminLeaguesListResponse"
+        "401":
+          description: Missing, invalid, or expired access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not a site admin
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/users:
+    get:
+      operationId: listAdminUsers
+      summary: List every user in the system (site admin only)
+      description: >
+        Requires is_site_admin=true (requireSiteAdmin). Every user, newest
+        first, with how many leagues each is a member of.
+      tags:
+        - Admin
+      parameters:
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageOffset"
+      responses:
+        "200":
+          description: Paginated list of users
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUsersListResponse"
+        "401":
+          description: Missing, invalid, or expired access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not a site admin
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/users/{id}/disable:
+    post:
+      operationId: disableUser
+      summary: Disable a user's account (site admin only)
+      description: >
+        Requires is_site_admin=true (requireSiteAdmin). Sets the target
+        user's status to 'disabled', which rejects their next login attempt
+        (internal/auth.Service.Login checks status != 'active'); an
+        already-issued access token stays valid until its own 15-minute
+        expiry. Writes an audit_log row (action=disable_user). Rejects with
+        403 if the target id is the acting admin's own id — a site admin
+        cannot disable their own account.
+      tags:
+        - Admin
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The updated user record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserDetail"
+        "401":
+          description: Missing, invalid, or expired access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not a site admin, or attempting to disable your own account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/users/{id}/enable:
+    post:
+      operationId: enableUser
+      summary: Re-enable a previously-disabled user's account (site admin only)
+      description: >
+        Requires is_site_admin=true (requireSiteAdmin). The symmetric undo
+        of POST /admin/users/{id}/disable — sets status back to 'active'.
+        Writes an audit_log row (action=enable_user).
+      tags:
+        - Admin
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The updated user record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserDetail"
+        "401":
+          description: Missing, invalid, or expired access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not a site admin
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/games/{id}/resync:
+    post:
+      operationId: resyncGame
+      summary: Re-fetch a single game from CFBD and upsert it (site admin only)
+      description: >
+        Requires is_site_admin=true (requireSiteAdmin). The direct unblock
+        mechanism for a game whose status is stuck postponed/canceled/stale
+        in a way that's blocking grading finalization for any league that
+        has it in a relevant week (see the grading pipeline's "Postponed/
+        canceled games are left ungraded and surfaced to admins" rule).
+        Re-fetches this game (by its games.id, not its CFBD external_id)
+        from CollegeFootballData.com and upserts it. If the upserted game's
+        status is now 'final', this triggers the same grading path the live
+        poll loop uses (GradeGame, then TryFinalizeLeagueWeek for every
+        league with picks in that week) and reports which league-weeks (if
+        any) actually finalized as a result. Always writes an audit_log row
+        (action=resync_game) once the game itself has been upserted.
+      tags:
+        - Admin
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The updated game, plus any league-weeks finalized as a result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResyncGameResponse"
+        "401":
+          description: Missing, invalid, or expired access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not a site admin
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Game not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: >
+            CFBD no longer reports a game with this external_id for its
+            season/week (a CFBD-side data issue, not something a resync can
+            resolve)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/audit-log:
+    get:
+      operationId: listAuditLog
+      summary: List audit log entries (site admin only)
+      description: >
+        Requires is_site_admin=true (requireSiteAdmin). Newest first.
+        action/actor_user_id are optional equality filters.
+      tags:
+        - Admin
+      parameters:
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageOffset"
+        - name: action
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Exact-match filter on the action name (e.g. "resync_game")
+        - name: actor_user_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Paginated list of audit log entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditLogListResponse"
+        "400":
+          description: actor_user_id is not a valid UUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing, invalid, or expired access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not a site admin
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
+  parameters:
+    PageLimit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 25
+      description: >
+        Max rows to return. Out-of-range values are clamped (not rejected)
+        server-side.
+    PageOffset:
+      name: offset
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
   schemas:
     HealthResponse:
       type: object
@@ -2000,3 +2291,250 @@ components:
         created_at:
           type: string
           format: date-time
+
+    AdminCommissioner:
+      type: object
+      description: Trimmed commissioner identity embedded in AdminLeague.
+      required:
+        - id
+        - display_name
+        - email
+      properties:
+        id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+        email:
+          type: string
+          format: email
+
+    AdminLeague:
+      type: object
+      description: >
+        One row of GET /admin/leagues — every league in the system, unlike
+        League (which always carries the requester's own membership; this
+        never does, since a site admin need not be a member).
+      required:
+        - id
+        - name
+        - conference
+        - season_year
+        - status
+        - commissioner
+        - member_count
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        conference:
+          type: string
+        season_year:
+          type: integer
+        status:
+          type: string
+          enum: [active]
+        commissioner:
+          $ref: "#/components/schemas/AdminCommissioner"
+        member_count:
+          type: integer
+          description: Count of non-removed league_memberships rows.
+        created_at:
+          type: string
+          format: date-time
+
+    AdminLeaguesListResponse:
+      type: object
+      required:
+        - leagues
+        - total
+        - limit
+        - offset
+      properties:
+        leagues:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminLeague"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    AdminUser:
+      type: object
+      description: One row of GET /admin/users — every user in the system.
+      required:
+        - id
+        - email
+        - display_name
+        - is_site_admin
+        - status
+        - league_count
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+        is_site_admin:
+          type: boolean
+        status:
+          type: string
+          enum: [active, disabled]
+        league_count:
+          type: integer
+          description: Count of non-removed league_memberships rows for this user.
+        created_at:
+          type: string
+          format: date-time
+
+    AdminUsersListResponse:
+      type: object
+      required:
+        - users
+        - total
+        - limit
+        - offset
+      properties:
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminUser"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    AdminUserDetail:
+      type: object
+      description: >
+        Response of POST /admin/users/{id}/disable and .../enable — the
+        updated user record in full.
+      required:
+        - id
+        - email
+        - display_name
+        - is_site_admin
+        - status
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+        is_site_admin:
+          type: boolean
+        status:
+          type: string
+          enum: [active, disabled]
+        created_at:
+          type: string
+          format: date-time
+
+    FinalizedLeagueWeek:
+      type: object
+      description: >
+        One league-week that a game resync's downstream grading pass
+        actually finalized.
+      required:
+        - league_id
+        - week_id
+        - mass_wipeout
+      properties:
+        league_id:
+          type: string
+          format: uuid
+        week_id:
+          type: string
+          format: uuid
+        mass_wipeout:
+          type: boolean
+
+    ResyncGameResponse:
+      type: object
+      required:
+        - game
+        - finalized_league_weeks
+      properties:
+        game:
+          $ref: "#/components/schemas/Game"
+          description: >
+            home_team/away_team here carry only `id` (name/conference/
+            logo_url are empty strings) — a resync response's caller
+            already knows which teams are playing; follow up with
+            GET /games/{id} for the fully joined shape.
+        finalized_league_weeks:
+          type: array
+          items:
+            $ref: "#/components/schemas/FinalizedLeagueWeek"
+          description: >
+            Empty if the resynced game isn't status=final, or is final but
+            no league-week was ready to finalize yet.
+
+    AuditLogEntry:
+      type: object
+      required:
+        - id
+        - action
+        - metadata
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        actor_user_id:
+          type: string
+          format: uuid
+          description: Absent for a system-triggered action with no acting user (e.g. the cron schedule sync).
+        league_id:
+          type: string
+          format: uuid
+          description: Present only for a league-scoped action (e.g. buyback).
+        action:
+          type: string
+          description: 'e.g. schedule_sync, buyback, disable_user, enable_user, resync_game'
+        target_type:
+          type: string
+          description: 'e.g. user, game, sync_run, league_membership'
+        target_id:
+          type: string
+          format: uuid
+        metadata:
+          type: object
+        created_at:
+          type: string
+          format: date-time
+
+    AuditLogListResponse:
+      type: object
+      required:
+        - entries
+        - total
+        - limit
+        - offset
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditLogEntry"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer

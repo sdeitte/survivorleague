@@ -13,6 +13,7 @@ import { LeagueDetailScreen } from './screens/LeagueDetailScreen';
 import { PicksScreen } from './screens/PicksScreen';
 import { LeaderboardScreen } from './screens/LeaderboardScreen';
 import { NotificationPreferencesScreen } from './screens/NotificationPreferencesScreen';
+import { AdminScreen } from './screens/AdminScreen';
 
 const queryClient = new QueryClient();
 
@@ -30,7 +31,8 @@ type Screen =
   | { name: 'leagueDetail'; leagueId: string }
   | { name: 'picks'; leagueId: string }
   | { name: 'leaderboard'; leagueId: string }
-  | { name: 'notificationPreferences' };
+  | { name: 'notificationPreferences' }
+  | { name: 'admin' };
 
 function Root() {
   const { user, isLoading } = useAuth();
@@ -63,6 +65,8 @@ function Root() {
       return <HealthScreen onBack={() => setScreen({ name: 'myLeagues' })} />;
     case 'notificationPreferences':
       return <NotificationPreferencesScreen onBack={() => setScreen({ name: 'myLeagues' })} />;
+    case 'admin':
+      return <AdminScreen onBack={() => setScreen({ name: 'myLeagues' })} />;
     case 'createLeague':
       return (
         <CreateLeagueScreen
@@ -105,6 +109,7 @@ function Root() {
           onNavigateToLeague={(leagueId) => setScreen({ name: 'leagueDetail', leagueId })}
           onNavigateToHealth={() => setScreen({ name: 'health' })}
           onNavigateToNotificationPreferences={() => setScreen({ name: 'notificationPreferences' })}
+          onNavigateToAdmin={user.is_site_admin ? () => setScreen({ name: 'admin' }) : undefined}
         />
       );
   }

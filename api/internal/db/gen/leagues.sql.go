@@ -11,6 +11,17 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countLeaguesAdmin = `-- name: CountLeaguesAdmin :one
+SELECT count(*) FROM leagues
+`
+
+func (q *Queries) CountLeaguesAdmin(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countLeaguesAdmin)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createLeague = `-- name: CreateLeague :one
 INSERT INTO leagues (name, season_year, conference, commissioner_user_id, invite_code)
 VALUES ($1, $2, $3, $4, $5)
@@ -99,6 +110,73 @@ func (q *Queries) LeagueInviteCodeExists(ctx context.Context, inviteCode string)
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
+}
+
+const listLeaguesAdmin = `-- name: ListLeaguesAdmin :many
+SELECT
+    l.id, l.name, l.conference, l.season_year, l.status, l.created_at,
+    l.commissioner_user_id,
+    u.display_name AS commissioner_display_name,
+    u.email AS commissioner_email,
+    (SELECT count(*) FROM league_memberships m WHERE m.league_id = l.id AND m.removed_at IS NULL)::bigint AS member_count
+FROM leagues l
+JOIN users u ON u.id = l.commissioner_user_id
+ORDER BY l.created_at DESC, l.id DESC
+LIMIT $2 OFFSET $1
+`
+
+type ListLeaguesAdminParams struct {
+	RowOffset int32 `json:"row_offset"`
+	RowLimit  int32 `json:"row_limit"`
+}
+
+type ListLeaguesAdminRow struct {
+	ID                      pgtype.UUID        `json:"id"`
+	Name                    string             `json:"name"`
+	Conference              string             `json:"conference"`
+	SeasonYear              int32              `json:"season_year"`
+	Status                  string             `json:"status"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	CommissionerUserID      pgtype.UUID        `json:"commissioner_user_id"`
+	CommissionerDisplayName string             `json:"commissioner_display_name"`
+	CommissionerEmail       string             `json:"commissioner_email"`
+	MemberCount             int64              `json:"member_count"`
+}
+
+// Backs GET /admin/leagues (Phase 8, requireSiteAdmin) — every league in
+// the system, not scoped to the requester (unlike GET /leagues). Joins the
+// commissioner's user row for display_name/email, and computes
+// member_count inline (non-removed league_memberships) the same way
+// ListUsersAdmin computes league_count.
+func (q *Queries) ListLeaguesAdmin(ctx context.Context, arg ListLeaguesAdminParams) ([]ListLeaguesAdminRow, error) {
+	rows, err := q.db.Query(ctx, listLeaguesAdmin, arg.RowOffset, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListLeaguesAdminRow{}
+	for rows.Next() {
+		var i ListLeaguesAdminRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Conference,
+			&i.SeasonYear,
+			&i.Status,
+			&i.CreatedAt,
+			&i.CommissionerUserID,
+			&i.CommissionerDisplayName,
+			&i.CommissionerEmail,
+			&i.MemberCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listLeaguesForUser = `-- name: ListLeaguesForUser :many

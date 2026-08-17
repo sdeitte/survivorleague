@@ -349,6 +349,70 @@ func (s *Service) RefreshWeek(ctx context.Context, seasonYear, weekNumber int) (
 	return result, nil
 }
 
+// RefreshGame re-fetches one specific game (identified by its games.id
+// primary key, not its CFBD external_id) from CFBD and upserts it via the
+// same UpsertGame path (and the same status/score/winner mapping — see
+// buildGameUpsertParams) as SyncSeason/RefreshWeek. This is what
+// POST /admin/games/:id/resync (Phase 8) calls to unblock a single game
+// whose status is stuck postponed/canceled/stale, without paying for a
+// whole week's refresh.
+//
+// The game must already exist (created by an earlier SyncSeason/
+// RefreshWeek) — RefreshGame never creates a new game row, only updates
+// one, and it re-resolves home/away teams by CFBD's reported homeId/awayId
+// (via GetTeamByExternalID) rather than trusting the existing row's
+// home_team_id/away_team_id, the same defensive approach RefreshWeek
+// takes. Returns ErrGameNotFound if gameID doesn't resolve to an existing
+// game, or ErrGameNotFoundInCFBD if CFBD's response for that game's
+// season/week no longer contains a game with this external_id.
+func (s *Service) RefreshGame(ctx context.Context, gameID pgtype.UUID) (gen.Game, error) {
+	game, err := s.queries.GetGame(ctx, gameID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return gen.Game{}, ErrGameNotFound
+		}
+		return gen.Game{}, fmt.Errorf("schedule: get game: %w", err)
+	}
+
+	week, err := s.queries.GetWeekByID(ctx, game.WeekID)
+	if err != nil {
+		return gen.Game{}, fmt.Errorf("schedule: get week for game %s: %w", game.ExternalID, err)
+	}
+
+	cfbdGames, err := s.cfbd.GetGamesForWeek(ctx, int(week.SeasonYear), int(week.WeekNumber))
+	if err != nil {
+		return gen.Game{}, fmt.Errorf("schedule: get games for week %d/%d: %w", week.SeasonYear, week.WeekNumber, err)
+	}
+
+	for _, g := range cfbdGames {
+		if fmt.Sprint(g.ID) != game.ExternalID {
+			continue
+		}
+
+		homeTeam, err := s.queries.GetTeamByExternalID(ctx, fmt.Sprint(g.HomeID))
+		if err != nil {
+			return gen.Game{}, fmt.Errorf("schedule: get home team for game %s: %w", game.ExternalID, err)
+		}
+		awayTeam, err := s.queries.GetTeamByExternalID(ctx, fmt.Sprint(g.AwayID))
+		if err != nil {
+			return gen.Game{}, fmt.Errorf("schedule: get away team for game %s: %w", game.ExternalID, err)
+		}
+
+		params, _, err := buildGameUpsertParams(g, week.ID, homeTeam.ID, awayTeam.ID)
+		if err != nil {
+			return gen.Game{}, fmt.Errorf("schedule: build upsert params for game %s: %w", game.ExternalID, err)
+		}
+
+		updated, err := s.queries.UpsertGame(ctx, params)
+		if err != nil {
+			return gen.Game{}, fmt.Errorf("schedule: upsert game %s: %w", game.ExternalID, err)
+		}
+		return updated, nil
+	}
+
+	return gen.Game{}, ErrGameNotFoundInCFBD
+}
+
 // parseCFBDTime parses CFBD's ISO-8601 startDate field into a
 // pgtype.Timestamptz. CFBD documents this field as RFC3339 date-time; games
 // with a genuinely blank date (as opposed to merely startTimeTBD=true, which

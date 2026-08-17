@@ -1,6 +1,7 @@
 import { Route, Routes } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthContext'
 import { ProtectedRoute } from './components/ProtectedRoute'
+import { SiteAdminRoute } from './components/SiteAdminRoute'
 import { HomePage } from './routes/HomePage'
 import { LoginPage } from './routes/LoginPage'
 import { RegisterPage } from './routes/RegisterPage'
@@ -11,6 +12,12 @@ import { LeagueDetailPage } from './routes/LeagueDetailPage'
 import { PicksPage } from './routes/PicksPage'
 import { LeaderboardPage } from './routes/LeaderboardPage'
 import { NotificationPreferencesPage } from './routes/NotificationPreferencesPage'
+import { AdminOverviewPage } from './routes/AdminOverviewPage'
+import { AdminLeaguesPage } from './routes/AdminLeaguesPage'
+import { AdminUsersPage } from './routes/AdminUsersPage'
+import { AdminSyncRunsPage } from './routes/AdminSyncRunsPage'
+import { AdminResyncGamePage } from './routes/AdminResyncGamePage'
+import { AdminAuditLogPage } from './routes/AdminAuditLogPage'
 
 function App() {
   return (
@@ -73,6 +80,54 @@ function App() {
             <ProtectedRoute>
               <NotificationPreferencesPage />
             </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin"
+          element={
+            <SiteAdminRoute>
+              <AdminOverviewPage />
+            </SiteAdminRoute>
+          }
+        />
+        <Route
+          path="/admin/leagues"
+          element={
+            <SiteAdminRoute>
+              <AdminLeaguesPage />
+            </SiteAdminRoute>
+          }
+        />
+        <Route
+          path="/admin/users"
+          element={
+            <SiteAdminRoute>
+              <AdminUsersPage />
+            </SiteAdminRoute>
+          }
+        />
+        <Route
+          path="/admin/sync-runs"
+          element={
+            <SiteAdminRoute>
+              <AdminSyncRunsPage />
+            </SiteAdminRoute>
+          }
+        />
+        <Route
+          path="/admin/resync-game"
+          element={
+            <SiteAdminRoute>
+              <AdminResyncGamePage />
+            </SiteAdminRoute>
+          }
+        />
+        <Route
+          path="/admin/audit-log"
+          element={
+            <SiteAdminRoute>
+              <AdminAuditLogPage />
+            </SiteAdminRoute>
           }
         />
       </Routes>

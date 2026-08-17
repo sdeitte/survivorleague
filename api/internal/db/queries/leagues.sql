@@ -37,3 +37,23 @@ UPDATE leagues
 SET invite_code = sqlc.arg(invite_code), updated_at = now()
 WHERE id = sqlc.arg(id)
 RETURNING *;
+
+-- name: ListLeaguesAdmin :many
+-- Backs GET /admin/leagues (Phase 8, requireSiteAdmin) — every league in
+-- the system, not scoped to the requester (unlike GET /leagues). Joins the
+-- commissioner's user row for display_name/email, and computes
+-- member_count inline (non-removed league_memberships) the same way
+-- ListUsersAdmin computes league_count.
+SELECT
+    l.id, l.name, l.conference, l.season_year, l.status, l.created_at,
+    l.commissioner_user_id,
+    u.display_name AS commissioner_display_name,
+    u.email AS commissioner_email,
+    (SELECT count(*) FROM league_memberships m WHERE m.league_id = l.id AND m.removed_at IS NULL)::bigint AS member_count
+FROM leagues l
+JOIN users u ON u.id = l.commissioner_user_id
+ORDER BY l.created_at DESC, l.id DESC
+LIMIT sqlc.arg(row_limit) OFFSET sqlc.arg(row_offset);
+
+-- name: CountLeaguesAdmin :one
+SELECT count(*) FROM leagues;

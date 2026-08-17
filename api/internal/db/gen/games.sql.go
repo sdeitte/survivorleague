@@ -11,6 +11,36 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getGame = `-- name: GetGame :one
+SELECT id, external_id, week_id, home_team_id, away_team_id, kickoff_at, status, home_score, away_score, winner_team_id, graded_at, created_at, updated_at FROM games WHERE id = $1
+`
+
+// Plain (unjoined) single-game lookup — backs internal/schedule's
+// RefreshGame (Phase 8's admin single-game resync), which only needs
+// week_id/external_id/home_team_id/away_team_id to resolve the game
+// against CFBD, not the joined team names GetGameByIDWithTeams carries for
+// API responses.
+func (q *Queries) GetGame(ctx context.Context, id pgtype.UUID) (Game, error) {
+	row := q.db.QueryRow(ctx, getGame, id)
+	var i Game
+	err := row.Scan(
+		&i.ID,
+		&i.ExternalID,
+		&i.WeekID,
+		&i.HomeTeamID,
+		&i.AwayTeamID,
+		&i.KickoffAt,
+		&i.Status,
+		&i.HomeScore,
+		&i.AwayScore,
+		&i.WinnerTeamID,
+		&i.GradedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getGameByIDWithTeams = `-- name: GetGameByIDWithTeams :one
 SELECT
     g.id, g.external_id, g.week_id, g.home_team_id, g.away_team_id, g.kickoff_at,

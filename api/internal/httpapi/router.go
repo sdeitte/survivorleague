@@ -129,6 +129,12 @@ func NewRouter(d Deps) http.Handler {
 	r.Route("/admin", func(r chi.Router) {
 		r.With(a.RequireSiteAdmin).Post("/sync/schedule", a.handleTriggerScheduleSync)
 		r.With(a.RequireSiteAdmin).Get("/sync/runs", a.handleListSyncRuns)
+		r.With(a.RequireSiteAdmin).Get("/leagues", a.handleListLeaguesAdmin)
+		r.With(a.RequireSiteAdmin).Get("/users", a.handleListUsersAdmin)
+		r.With(a.RequireSiteAdmin).Post("/users/{id}/disable", a.handleDisableUser)
+		r.With(a.RequireSiteAdmin).Post("/users/{id}/enable", a.handleEnableUser)
+		r.With(a.RequireSiteAdmin).Post("/games/{id}/resync", a.handleResyncGame)
+		r.With(a.RequireSiteAdmin).Get("/audit-log", a.handleListAuditLog)
 	})
 
 	return r

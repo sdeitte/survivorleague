@@ -87,6 +87,11 @@ export function HomePage() {
           <Link to="/health" className="text-xs text-slate-500 underline">
             API health check
           </Link>
+          {user?.is_site_admin && (
+            <Link to="/admin" className="text-xs text-emerald-400 underline">
+              Site admin
+            </Link>
+          )}
         </div>
       </div>
     </main>

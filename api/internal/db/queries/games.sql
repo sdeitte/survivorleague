@@ -50,3 +50,11 @@ FROM games g
 JOIN teams ht ON ht.id = g.home_team_id
 JOIN teams at ON at.id = g.away_team_id
 WHERE g.id = sqlc.arg(id);
+
+-- name: GetGame :one
+-- Plain (unjoined) single-game lookup — backs internal/schedule's
+-- RefreshGame (Phase 8's admin single-game resync), which only needs
+-- week_id/external_id/home_team_id/away_team_id to resolve the game
+-- against CFBD, not the joined team names GetGameByIDWithTeams carries for
+-- API responses.
+SELECT * FROM games WHERE id = sqlc.arg(id);

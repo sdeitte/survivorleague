@@ -34,9 +34,12 @@ type Querier interface {
 	// leaving rows stranded in some intermediate "claimed but never finished"
 	// state.
 	ClaimPendingNotifications(ctx context.Context, limitCount int32) ([]NotificationOutbox, error)
+	CountAuditLog(ctx context.Context, arg CountAuditLogParams) (int64, error)
+	CountLeaguesAdmin(ctx context.Context) (int64, error)
 	// Test/verification helper — lets integration tests assert "N rows
 	// enqueued" without reaching for raw SQL.
 	CountPendingNotifications(ctx context.Context) (int64, error)
+	CountUsersAdmin(ctx context.Context) (int64, error)
 	// Every commissioner/admin privileged action writes a row here per the
 	// plan's Data Model section. league_id/target_type/target_id are nullable
 	// (e.g. a schedule_sync action has no league scope).
@@ -70,6 +73,12 @@ type Querier interface {
 	// "invalid or already-used token" without distinguishing why, to avoid
 	// leaking timing/existence information.
 	GetActiveRefreshTokenByHash(ctx context.Context, tokenHash string) (RefreshToken, error)
+	// Plain (unjoined) single-game lookup — backs internal/schedule's
+	// RefreshGame (Phase 8's admin single-game resync), which only needs
+	// week_id/external_id/home_team_id/away_team_id to resolve the game
+	// against CFBD, not the joined team names GetGameByIDWithTeams carries for
+	// API responses.
+	GetGame(ctx context.Context, id pgtype.UUID) (Game, error)
 	GetGameByIDWithTeams(ctx context.Context, id pgtype.UUID) (GetGameByIDWithTeamsRow, error)
 	// Phase 5: grading/elimination pipeline queries. See internal/grading's
 	// package doc comment for the full GradeGame/TryFinalizeLeagueWeek
@@ -166,6 +175,11 @@ type Querier interface {
 	// second lookup per row.
 	ListActiveContestantMembershipsForReminderScan(ctx context.Context) ([]ListActiveContestantMembershipsForReminderScanRow, error)
 	ListActiveMembersWithUser(ctx context.Context, leagueID pgtype.UUID) ([]ListActiveMembersWithUserRow, error)
+	// Backs GET /admin/audit-log (Phase 8, requireSiteAdmin). Newest first,
+	// with optional equality filters on action/actor_user_id — both narg so a
+	// NULL means "don't filter on this field" (mirrors ListTeams' conference
+	// narg pattern in teams.sql).
+	ListAuditLog(ctx context.Context, arg ListAuditLogParams) ([]AuditLog, error)
 	// Every team in the league's conference that has a game in the given week,
 	// with its opponent, game id, and kickoff time inline so the picks screen
 	// doesn't need N+1 lookups. is_locked/is_used_elsewhere are computed by
@@ -205,6 +219,12 @@ type Querier interface {
 	// phase's scope (would need a periodic sweep, not just a
 	// game-finalization trigger).
 	ListLeagueIDsWithPicksForWeek(ctx context.Context, weekID pgtype.UUID) ([]pgtype.UUID, error)
+	// Backs GET /admin/leagues (Phase 8, requireSiteAdmin) — every league in
+	// the system, not scoped to the requester (unlike GET /leagues). Joins the
+	// commissioner's user row for display_name/email, and computes
+	// member_count inline (non-removed league_memberships) the same way
+	// ListUsersAdmin computes league_count.
+	ListLeaguesAdmin(ctx context.Context, arg ListLeaguesAdminParams) ([]ListLeaguesAdminRow, error)
 	// Leagues the given user has a non-removed membership in, along with their
 	// role/is_contestant/status in each (GET /leagues needs both in one shot).
 	ListLeaguesForUser(ctx context.Context, userID pgtype.UUID) ([]ListLeaguesForUserRow, error)
@@ -232,6 +252,12 @@ type Querier interface {
 	// game has locked yet, per the "used" rule (a team is only free again once
 	// no row anywhere holds it). Backs available-teams' is_used_elsewhere.
 	ListUsedTeamIDsForMembershipExcludingWeek(ctx context.Context, arg ListUsedTeamIDsForMembershipExcludingWeekParams) ([]pgtype.UUID, error)
+	// Backs GET /admin/users (Phase 8, requireSiteAdmin) — every user in the
+	// system, not scoped to the requester (unlike every other user-facing
+	// endpoint so far). league_count is how many non-removed league_memberships
+	// rows this user has, computed inline rather than via a join+GROUP BY so a
+	// user in zero leagues still gets one output row.
+	ListUsersAdmin(ctx context.Context, arg ListUsersAdminParams) ([]ListUsersAdminRow, error)
 	ListWeeksBySeasonYear(ctx context.Context, seasonYear int32) ([]Week, error)
 	// Sets the graded_at idempotency guard. WHERE graded_at IS NULL is
 	// defensive redundancy on top of the FOR UPDATE row lock above — belt and
@@ -259,6 +285,15 @@ type Querier interface {
 	UpdateLeagueInviteCode(ctx context.Context, arg UpdateLeagueInviteCodeParams) (League, error)
 	UpdateLeagueName(ctx context.Context, arg UpdateLeagueNameParams) (League, error)
 	UpdateUserDisplayName(ctx context.Context, arg UpdateUserDisplayNameParams) (User, error)
+	// Backs POST /admin/users/:id/disable and .../enable (Phase 8). status is
+	// validated against the app-level enum (active/disabled — see
+	// internal/admin's UserStatus constants) by the caller, not a DB CHECK
+	// constraint, matching every other status column in this schema (see
+	// notification_outbox.sql's comment on the same convention). Login already
+	// rejects any user.status != 'active' (internal/auth.Service.Login), so
+	// setting status='disabled' here is what actually blocks a disabled user's
+	// next login attempt.
+	UpdateUserStatus(ctx context.Context, arg UpdateUserStatusParams) (User, error)
 	// Phase 7: device token registration backing POST/DELETE /me/device-tokens.
 	// token itself is globally UNIQUE (not a composite (user_id, token) key —
 	// see device_tokens' definition in 00001_init.sql), so re-registering the

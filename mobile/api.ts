@@ -25,6 +25,89 @@ export interface User {
   is_site_admin: boolean;
 }
 
+// --- Admin (Phase 8) ---
+
+export interface AdminCommissioner {
+  id: string;
+  display_name: string;
+  email: string;
+}
+
+export interface AdminLeague {
+  id: string;
+  name: string;
+  conference: string;
+  season_year: number;
+  status: 'active';
+  commissioner: AdminCommissioner;
+  member_count: number;
+  created_at: string;
+}
+
+export interface AdminLeaguesListResponse {
+  leagues: AdminLeague[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  display_name: string;
+  is_site_admin: boolean;
+  status: 'active' | 'disabled';
+  league_count: number;
+  created_at: string;
+}
+
+export interface AdminUsersListResponse {
+  users: AdminUser[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface FinalizedLeagueWeek {
+  league_id: string;
+  week_id: string;
+  mass_wipeout: boolean;
+}
+
+export interface ResyncGameResponse {
+  game: Game;
+  finalized_league_weeks: FinalizedLeagueWeek[];
+}
+
+export interface AuditLogEntry {
+  id: string;
+  actor_user_id?: string;
+  league_id?: string;
+  action: string;
+  target_type?: string;
+  target_id?: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface AuditLogListResponse {
+  entries: AuditLogEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface SyncRun {
+  id: string;
+  kind: 'schedule';
+  status: 'running' | 'success' | 'failed';
+  started_at: string;
+  finished_at?: string;
+  error?: string;
+  details: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface SessionResponse {
   access_token: string;
   refresh_token?: string;
@@ -412,4 +495,54 @@ export async function updateNotificationPreferences(
 ): Promise<NotificationPreferences> {
   const res = await rawFetch('/me/notification-preferences', { method: 'PUT', body: prefs, accessToken });
   return parseJsonOrThrow<NotificationPreferences>(res);
+}
+
+// --- Admin (Phase 8, plus Phase 3's sync-runs endpoints) ---
+
+export async function triggerScheduleSync(accessToken: string, seasonYear: number): Promise<SyncRun> {
+  const res = await rawFetch('/admin/sync/schedule', { method: 'POST', body: { season_year: seasonYear }, accessToken });
+  return parseJsonOrThrow<SyncRun>(res);
+}
+
+export async function listSyncRuns(accessToken: string): Promise<SyncRun[]> {
+  const res = await rawFetch('/admin/sync/runs', { accessToken });
+  return parseJsonOrThrow<SyncRun[]>(res);
+}
+
+export async function listAdminLeagues(accessToken: string, limit: number, offset: number): Promise<AdminLeaguesListResponse> {
+  const res = await rawFetch(`/admin/leagues?limit=${limit}&offset=${offset}`, { accessToken });
+  return parseJsonOrThrow<AdminLeaguesListResponse>(res);
+}
+
+export async function listAdminUsers(accessToken: string, limit: number, offset: number): Promise<AdminUsersListResponse> {
+  const res = await rawFetch(`/admin/users?limit=${limit}&offset=${offset}`, { accessToken });
+  return parseJsonOrThrow<AdminUsersListResponse>(res);
+}
+
+export async function disableUser(accessToken: string, userId: string): Promise<AdminUser> {
+  const res = await rawFetch(`/admin/users/${userId}/disable`, { method: 'POST', accessToken });
+  return parseJsonOrThrow<AdminUser>(res);
+}
+
+export async function enableUser(accessToken: string, userId: string): Promise<AdminUser> {
+  const res = await rawFetch(`/admin/users/${userId}/enable`, { method: 'POST', accessToken });
+  return parseJsonOrThrow<AdminUser>(res);
+}
+
+export async function resyncGame(accessToken: string, gameId: string): Promise<ResyncGameResponse> {
+  const res = await rawFetch(`/admin/games/${gameId}/resync`, { method: 'POST', accessToken });
+  return parseJsonOrThrow<ResyncGameResponse>(res);
+}
+
+export async function listAuditLog(
+  accessToken: string,
+  limit: number,
+  offset: number,
+  filters: { action?: string; actor_user_id?: string } = {},
+): Promise<AuditLogListResponse> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (filters.action) params.set('action', filters.action);
+  if (filters.actor_user_id) params.set('actor_user_id', filters.actor_user_id);
+  const res = await rawFetch(`/admin/audit-log?${params.toString()}`, { accessToken });
+  return parseJsonOrThrow<AuditLogListResponse>(res);
 }

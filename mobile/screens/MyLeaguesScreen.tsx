@@ -14,12 +14,15 @@ export function MyLeaguesScreen({
   onNavigateToLeague,
   onNavigateToHealth,
   onNavigateToNotificationPreferences,
+  onNavigateToAdmin,
 }: {
   onNavigateToCreate: () => void;
   onNavigateToJoin: () => void;
   onNavigateToLeague: (leagueId: string) => void;
   onNavigateToHealth: () => void;
   onNavigateToNotificationPreferences: () => void;
+  /** Present only for a signed-in site admin (see App.tsx). */
+  onNavigateToAdmin?: () => void;
 }) {
   const { user, logout, authFetch } = useAuth();
 
@@ -90,6 +93,11 @@ export function MyLeaguesScreen({
       <Pressable onPress={onNavigateToHealth}>
         <Text style={styles.link}>API health check</Text>
       </Pressable>
+      {onNavigateToAdmin && (
+        <Pressable onPress={onNavigateToAdmin}>
+          <Text style={styles.linkAdmin}>Site admin</Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -192,6 +200,12 @@ const styles = StyleSheet.create({
   },
   link: {
     color: '#94a3b8',
+    fontSize: 13,
+    textAlign: 'center',
+    textDecorationLine: 'underline',
+  },
+  linkAdmin: {
+    color: '#34d399',
     fontSize: 13,
     textAlign: 'center',
     textDecorationLine: 'underline',

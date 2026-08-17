@@ -234,6 +234,45 @@ func TestRouteTable_AdminRoutesRequireSiteAdmin(t *testing.T) {
 	}
 }
 
+// TestRouteTable_Phase8AdminRoutesRequireSiteAdmin is the Phase 8 extension
+// of the plan's "Auth & RBAC" regression-guard pattern: an explicit
+// want-map (mirroring TestRouteTable_CommissionerOnlyRoutesRequireCommissioner's
+// style) for every route this phase adds — cross-league oversight
+// (leagues/users listing), user disable/enable, single-game resync, and the
+// audit log viewer. Redundant with the prefix-based
+// TestRouteTable_AdminRoutesRequireSiteAdmin above by design: that one
+// guards against a route being added under /admin with no RequireSiteAdmin
+// at all, this one guards against one of these specific routes moving,
+// being renamed, or silently disappearing from the route table.
+func TestRouteTable_Phase8AdminRoutesRequireSiteAdmin(t *testing.T) {
+	entries := walkRoutes(t, buildTestRouter(t))
+
+	want := map[string]bool{
+		"GET /admin/leagues":             false,
+		"GET /admin/users":               false,
+		"POST /admin/users/{id}/disable": false,
+		"POST /admin/users/{id}/enable":  false,
+		"POST /admin/games/{id}/resync":  false,
+		"GET /admin/audit-log":           false,
+	}
+
+	for _, e := range entries {
+		key := e.method + " " + e.route
+		if _, tracked := want[key]; !tracked {
+			continue
+		}
+		want[key] = true
+		if !hasMiddleware(e.middlewares, "RequireSiteAdmin") {
+			t.Errorf("%s does not carry RequireSiteAdmin; middlewares=%v", key, e.middlewares)
+		}
+	}
+	for key, seen := range want {
+		if !seen {
+			t.Errorf("expected Phase 8 admin route %q not found in route table", key)
+		}
+	}
+}
+
 // TestRouteTable_PicksRoutesRequireLeagueMember is the Phase 4 extension of
 // the plan's "Auth & RBAC" regression-guard pattern: every
 // /leagues/{id}/weeks/{weekId}/... picks route must carry at least

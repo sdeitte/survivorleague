@@ -11,6 +11,17 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countUsersAdmin = `-- name: CountUsersAdmin :one
+SELECT count(*) FROM users
+`
+
+func (q *Queries) CountUsersAdmin(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countUsersAdmin)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (email, password_hash, display_name, is_site_admin)
 VALUES (lower($1), $2, $3, $4)
@@ -85,6 +96,63 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 	return i, err
 }
 
+const listUsersAdmin = `-- name: ListUsersAdmin :many
+SELECT
+    u.id, u.email, u.display_name, u.is_site_admin, u.status, u.created_at,
+    (SELECT count(*) FROM league_memberships m WHERE m.user_id = u.id AND m.removed_at IS NULL)::bigint AS league_count
+FROM users u
+ORDER BY u.created_at DESC, u.id DESC
+LIMIT $2 OFFSET $1
+`
+
+type ListUsersAdminParams struct {
+	RowOffset int32 `json:"row_offset"`
+	RowLimit  int32 `json:"row_limit"`
+}
+
+type ListUsersAdminRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	Email       string             `json:"email"`
+	DisplayName string             `json:"display_name"`
+	IsSiteAdmin bool               `json:"is_site_admin"`
+	Status      string             `json:"status"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	LeagueCount int64              `json:"league_count"`
+}
+
+// Backs GET /admin/users (Phase 8, requireSiteAdmin) — every user in the
+// system, not scoped to the requester (unlike every other user-facing
+// endpoint so far). league_count is how many non-removed league_memberships
+// rows this user has, computed inline rather than via a join+GROUP BY so a
+// user in zero leagues still gets one output row.
+func (q *Queries) ListUsersAdmin(ctx context.Context, arg ListUsersAdminParams) ([]ListUsersAdminRow, error) {
+	rows, err := q.db.Query(ctx, listUsersAdmin, arg.RowOffset, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUsersAdminRow{}
+	for rows.Next() {
+		var i ListUsersAdminRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Email,
+			&i.DisplayName,
+			&i.IsSiteAdmin,
+			&i.Status,
+			&i.CreatedAt,
+			&i.LeagueCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateUserDisplayName = `-- name: UpdateUserDisplayName :one
 UPDATE users
 SET display_name = $1, updated_at = now()
@@ -99,6 +167,42 @@ type UpdateUserDisplayNameParams struct {
 
 func (q *Queries) UpdateUserDisplayName(ctx context.Context, arg UpdateUserDisplayNameParams) (User, error) {
 	row := q.db.QueryRow(ctx, updateUserDisplayName, arg.DisplayName, arg.ID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.IsSiteAdmin,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateUserStatus = `-- name: UpdateUserStatus :one
+UPDATE users
+SET status = $1, updated_at = now()
+WHERE id = $2
+RETURNING id, email, password_hash, display_name, is_site_admin, status, created_at, updated_at
+`
+
+type UpdateUserStatusParams struct {
+	Status string      `json:"status"`
+	ID     pgtype.UUID `json:"id"`
+}
+
+// Backs POST /admin/users/:id/disable and .../enable (Phase 8). status is
+// validated against the app-level enum (active/disabled — see
+// internal/admin's UserStatus constants) by the caller, not a DB CHECK
+// constraint, matching every other status column in this schema (see
+// notification_outbox.sql's comment on the same convention). Login already
+// rejects any user.status != 'active' (internal/auth.Service.Login), so
+// setting status='disabled' here is what actually blocks a disabled user's
+// next login attempt.
+func (q *Queries) UpdateUserStatus(ctx context.Context, arg UpdateUserStatusParams) (User, error) {
+	row := q.db.QueryRow(ctx, updateUserStatus, arg.Status, arg.ID)
 	var i User
 	err := row.Scan(
 		&i.ID,

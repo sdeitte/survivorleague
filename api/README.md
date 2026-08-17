@@ -10,7 +10,11 @@ ingestion (`internal/schedule`), read-only `/weeks`, `/weeks/:id/games`,
 (`internal/admin` — triggering/viewing a schedule sync, the first real use
 of `requireSiteAdmin`), and a daily cron sync. Phase 4 adds pick
 submission/retrieval (`internal/picks`) with server-enforced per-game
-locking and the no-repeat-team rule.
+locking and the no-repeat-team rule. Phase 5 adds the grading/elimination
+pipeline (`internal/grading`) and the adaptive live poll loop
+(`internal/livepoll`). Phase 6 adds commissioner buy-back. Phase 7 adds
+notifications (`internal/notify`). Phase 8 completes site-admin: see
+"Admin endpoints (Phase 8)" below.
 
 See the full plan: `/Users/sdeitte/.claude/plans/witty-questing-barto.md`.
 
@@ -172,6 +176,35 @@ fetch the spec itself. `internal/schedule`'s tests mock CFBD entirely via
 `httptest.Server` with hand-authored fixture JSON matching that schema; no
 live network calls happen in `go test`.
 
+## Admin endpoints (Phase 8)
+
+All `requireSiteAdmin`, all under `/admin`:
+
+- `GET /admin/leagues`, `GET /admin/users` — every league/user in the
+  system (unlike every other league/user endpoint, not scoped to the
+  requester), paginated via `limit`/`offset` query params (default 25, max
+  100 — clamped, not rejected, on out-of-range input).
+- `POST /admin/users/:id/disable` / `.../enable` — sets `users.status` to
+  `disabled`/`active`. `internal/auth.Service.Login` already rejects any
+  non-`active` status, so disabling is what actually blocks a user's next
+  login attempt; an already-issued access token stays valid until its own
+  15-minute expiry (no access-token blocklist anywhere in this API).
+  Rejects with 403 if the target is the acting admin's own account — no
+  self-lockout. Both write an `audit_log` row.
+- `POST /admin/games/:id/resync` — re-fetches one game from CFBD
+  (`internal/schedule`'s `Service.RefreshGame`, reusing the Phase 3
+  `CFBDClient` — no second client) and upserts it. This is the unblock
+  mechanism for a game `internal/grading` left `postponed`/`canceled`
+  (grading deliberately never auto-resolves those — see
+  `internal/grading`'s package doc comment). If the resync brings the game
+  to `status=final`, this runs the exact same grading pass
+  `internal/livepoll`'s poll loop would (`GradeGame`, then
+  `TryFinalizeLeagueWeek` for every league with picks that week) and
+  reports which league-weeks actually finalized as a result. Always writes
+  an `audit_log` row once the game itself has been upserted.
+- `GET /admin/audit-log` — paginated, newest first, with optional
+  `action`/`actor_user_id` equality filters.
+
 ## Build / vet / test
 
 ```sh
@@ -198,11 +231,16 @@ internal/
                FBS conference list + CFBD conference-name normalization,
                read access for GET /weeks, /weeks/:id/games, /games/:id,
                /teams (Phase 3)
-  admin/       site-admin schedule-sync trigger + sync_runs/audit_log
-               bookkeeping (Phase 3); cross-league oversight lands Phase 8
+  admin/       site-admin: schedule-sync trigger + sync_runs bookkeeping
+               (Phase 3); cross-league leagues/users listing, user
+               disable/enable, single-game CFBD resync, audit log viewer
+               (Phase 8)
   picks/       pick submission/retrieval, per-game locking, no-repeat-team
                rule (Phase 4)
-  grading, notify — empty stubs, filled in phase-by-phase per the roadmap
+  grading/     grade-on-final + weekly elimination/mass-wipeout pipeline (Phase 5)
+  livepoll/    adaptive live-score poll loop that drives grading (Phase 5)
+  notify/      device tokens/preferences, notification_outbox dispatcher,
+               Expo Push + Resend delivery (Phase 7)
 migrations/    goose SQL migrations
 openapi/       openapi.yaml, the source-of-truth API spec
 sqlc.yaml      sqlc codegen config
