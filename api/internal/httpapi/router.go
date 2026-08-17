@@ -9,8 +9,10 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/sdeitte/survivor-league-api/internal/admin"
 	"github.com/sdeitte/survivor-league-api/internal/auth"
 	"github.com/sdeitte/survivor-league-api/internal/leagues"
+	"github.com/sdeitte/survivor-league-api/internal/schedule"
 )
 
 // Deps are the dependencies NewRouter needs to wire up routes/middleware.
@@ -18,6 +20,8 @@ type Deps struct {
 	Pool              *pgxpool.Pool
 	AuthService       *auth.Service
 	LeaguesService    *leagues.Service
+	ScheduleService   *schedule.Service
+	AdminService      *admin.Service
 	JWT               *auth.JWTIssuer
 	AppEnv            string // "development" | "production" — gates cookie Secure flag
 	CORSAllowedOrigin string
@@ -25,22 +29,27 @@ type Deps struct {
 
 // API holds the dependencies shared by the httpapi handlers/middleware.
 type API struct {
-	pool           *pgxpool.Pool
-	authService    *auth.Service
-	leaguesService *leagues.Service
-	jwt            *auth.JWTIssuer
-	appEnv         string
+	pool            *pgxpool.Pool
+	authService     *auth.Service
+	leaguesService  *leagues.Service
+	scheduleService *schedule.Service
+	adminService    *admin.Service
+	jwt             *auth.JWTIssuer
+	appEnv          string
 }
 
 // NewRouter builds the full chi router: middleware stack, CORS, and all
-// routes for this phase (health, auth, me, leagues/invites/conferences).
+// routes for this phase (health, auth, me, leagues/invites/conferences,
+// schedule reads, admin schedule sync).
 func NewRouter(d Deps) http.Handler {
 	a := &API{
-		pool:           d.Pool,
-		authService:    d.AuthService,
-		leaguesService: d.LeaguesService,
-		jwt:            d.JWT,
-		appEnv:         d.AppEnv,
+		pool:            d.Pool,
+		authService:     d.AuthService,
+		leaguesService:  d.LeaguesService,
+		scheduleService: d.ScheduleService,
+		adminService:    d.AdminService,
+		jwt:             d.JWT,
+		appEnv:          d.AppEnv,
 	}
 
 	r := chi.NewRouter()
@@ -89,6 +98,16 @@ func NewRouter(d Deps) http.Handler {
 
 	r.Get("/invites/{code}", a.handlePreviewInvite)
 	r.With(a.RequireAuth).Post("/invites/{code}/join", a.handleJoinByCode)
+
+	r.With(a.RequireAuth).Get("/weeks", a.handleListWeeks)
+	r.With(a.RequireAuth).Get("/weeks/{id}/games", a.handleListWeekGames)
+	r.With(a.RequireAuth).Get("/games/{id}", a.handleGetGame)
+	r.With(a.RequireAuth).Get("/teams", a.handleListTeams)
+
+	r.Route("/admin", func(r chi.Router) {
+		r.With(a.RequireSiteAdmin).Post("/sync/schedule", a.handleTriggerScheduleSync)
+		r.With(a.RequireSiteAdmin).Get("/sync/runs", a.handleListSyncRuns)
+	})
 
 	return r
 }

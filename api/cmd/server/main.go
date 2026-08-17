@@ -1,11 +1,16 @@
 // Command server starts the Survivor League HTTP API.
 //
 // Phase 1 added auth (register/login/refresh/logout), GET/PATCH /me, and
-// the requireAuth/requireSiteAdmin middleware. Phase 2 adds league CRUD,
+// the requireAuth/requireSiteAdmin middleware. Phase 2 added league CRUD,
 // membership, and the invite-code join flow, plus the
-// requireLeagueMember/requireCommissioner middleware. Route wiring lives in
+// requireLeagueMember/requireCommissioner middleware. Phase 3 adds CFBD
+// schedule ingestion (internal/schedule), the site-admin sync-trigger
+// endpoints (internal/admin, the first real use of requireSiteAdmin), and a
+// daily cron job that keeps the schedule in sync automatically — additive
+// to the manual admin endpoint, not a replacement. Route wiring lives in
 // internal/httpapi; this file just reads configuration from the
-// environment and assembles dependencies.
+// environment, assembles dependencies, and owns process lifecycle (HTTP
+// server + cron scheduler, both stopped cleanly on shutdown).
 package main
 
 import (
@@ -13,13 +18,20 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/robfig/cron/v3"
+
+	"github.com/sdeitte/survivor-league-api/internal/admin"
 	"github.com/sdeitte/survivor-league-api/internal/auth"
 	"github.com/sdeitte/survivor-league-api/internal/db"
 	"github.com/sdeitte/survivor-league-api/internal/db/gen"
 	"github.com/sdeitte/survivor-league-api/internal/httpapi"
 	"github.com/sdeitte/survivor-league-api/internal/leagues"
+	"github.com/sdeitte/survivor-league-api/internal/schedule"
 )
 
 func getenv(key, fallback string) string {
@@ -29,11 +41,36 @@ func getenv(key, fallback string) string {
 	return fallback
 }
 
+// currentSeasonYear picks the season_year the daily cron sync should run
+// against. College football seasons run August-January under a single
+// season_year equal to the calendar year they start in, so during the
+// Jan-Jun off-season "the current season" means the one that most recently
+// finished/is about to start (last calendar year), not the current
+// mid-season calendar year. July is treated as the start of the runway into
+// a new season (fall camp announcements, early schedule data) rather than
+// waiting for August.
+func currentSeasonYear(now time.Time) int {
+	if now.Month() >= time.July {
+		return now.Year()
+	}
+	return now.Year() - 1
+}
+
 func main() {
 	port := getenv("PORT", "8080")
 	appEnv := getenv("APP_ENV", "development")
 	corsAllowedOrigin := getenv("CORS_ALLOWED_ORIGIN", "http://localhost:5173")
 	adminEmail := os.Getenv("ADMIN_EMAIL")
+
+	// CFBD_BASE_URL is configurable specifically so it can be pointed at a
+	// mock HTTP server for local/E2E testing — there is no live CFBD API
+	// key in this environment yet (see internal/schedule/cfbd_client.go).
+	// Defaults to the real collegefootballdata.com host.
+	cfbdBaseURL := getenv("CFBD_BASE_URL", schedule.DefaultCFBDBaseURL)
+	cfbdAPIKey := os.Getenv("CFBD_API_KEY")
+	if cfbdAPIKey == "" {
+		log.Print("warning: CFBD_API_KEY is not set — schedule sync calls to the real CFBD API will fail with 401 until a key is configured")
+	}
 
 	// Both are required from Phase 1 onward: every route except /health
 	// needs a database, and no token can be issued/verified without a
@@ -47,10 +84,10 @@ func main() {
 		log.Fatal("JWT_SECRET must be set (see .env.example for a dev-only default)")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	setupCtx, cancelSetup := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelSetup()
 
-	pool, err := db.NewPool(ctx, databaseURL)
+	pool, err := db.NewPool(setupCtx, databaseURL)
 	if err != nil {
 		log.Fatalf("failed to configure database pool: %v", err)
 	}
@@ -60,19 +97,83 @@ func main() {
 	queries := gen.New(pool)
 	authService := auth.NewService(queries, jwtIssuer, adminEmail)
 	leaguesService := leagues.NewService(queries, pool)
+	cfbdClient := schedule.NewCFBDClient(http.DefaultClient, cfbdBaseURL, cfbdAPIKey)
+	scheduleService := schedule.NewService(queries, cfbdClient)
+	adminService := admin.NewService(queries, scheduleService)
 
 	router := httpapi.NewRouter(httpapi.Deps{
 		Pool:              pool,
 		AuthService:       authService,
 		LeaguesService:    leaguesService,
+		ScheduleService:   scheduleService,
+		AdminService:      adminService,
 		JWT:               jwtIssuer,
 		AppEnv:            appEnv,
 		CORSAllowedOrigin: corsAllowedOrigin,
 	})
 
-	addr := ":" + port
-	log.Printf("survivor-league-api listening on %s (env=%s, cors_origin=%s)", addr, appEnv, corsAllowedOrigin)
-	if err := http.ListenAndServe(addr, router); err != nil {
-		log.Fatalf("server error: %v", err)
+	// --- Daily schedule-sync cron (additive to the manual admin endpoint) ---
+	//
+	// Runs at 6:00 AM America/New_York — off-peak, well after any
+	// late-night games have finished and their final scores/statuses have
+	// settled, and before most users start checking picks for the day.
+	// Falls back to UTC if the timezone database isn't available in the
+	// runtime environment (rare, but cleaner than crashing the whole
+	// server startup over the scheduler's timezone).
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		log.Printf("warning: could not load America/New_York timezone (%v) — cron will run on UTC instead", err)
+		loc = time.UTC
+	}
+	cronScheduler := cron.New(cron.WithLocation(loc))
+	_, err = cronScheduler.AddFunc("0 6 * * *", func() {
+		year := currentSeasonYear(time.Now())
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		// triggeredBy is intentionally the zero value (invalid UUID): the
+		// cron job has no acting user, so TriggerScheduleSync skips writing
+		// an audit_log row for it (audit_log.actor_user_id would have
+		// nothing meaningful to point at) while still recording the
+		// sync_runs row with trigger="cron".
+		if _, err := adminService.TriggerScheduleSync(ctx, pgtype.UUID{}, admin.TriggerCron, year); err != nil {
+			log.Printf("cron schedule sync (season_year=%d) failed: %v", year, err)
+		} else {
+			log.Printf("cron schedule sync (season_year=%d) completed", year)
+		}
+	})
+	if err != nil {
+		log.Fatalf("failed to schedule cron job: %v", err)
+	}
+	cronScheduler.Start()
+
+	server := &http.Server{
+		Addr:    ":" + port,
+		Handler: router,
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		log.Printf("survivor-league-api listening on %s (env=%s, cors_origin=%s)", server.Addr, appEnv, corsAllowedOrigin)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("server error: %v", err)
+		}
+	}()
+
+	<-ctx.Done()
+	log.Print("shutting down")
+
+	shutdownCtx := cronScheduler.Stop() // stops the scheduler, returns a ctx that's Done once running jobs finish
+	select {
+	case <-shutdownCtx.Done():
+	case <-time.After(30 * time.Second):
+		log.Print("timed out waiting for in-flight cron jobs to finish")
+	}
+
+	httpShutdownCtx, cancelHTTPShutdown := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelHTTPShutdown()
+	if err := server.Shutdown(httpShutdownCtx); err != nil {
+		log.Printf("error during HTTP server shutdown: %v", err)
 	}
 }

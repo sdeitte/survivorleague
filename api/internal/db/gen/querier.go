@@ -11,26 +11,50 @@ import (
 )
 
 type Querier interface {
+	// Every commissioner/admin privileged action writes a row here per the
+	// plan's Data Model section. league_id/target_type/target_id are nullable
+	// (e.g. a schedule_sync action has no league scope).
+	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) (AuditLog, error)
 	CreateLeague(ctx context.Context, arg CreateLeagueParams) (League, error)
 	CreateLeagueMembership(ctx context.Context, arg CreateLeagueMembershipParams) (LeagueMembership, error)
 	CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) (RefreshToken, error)
+	// Started at insert time (status='running'); FinishSyncRun closes it out.
+	// Two-phase rather than a single post-hoc insert so a crash mid-sync
+	// leaves a visibly stuck 'running' row in the admin history rather than no
+	// record at all. `details` carries trigger/triggered_by/season_year up
+	// front (and gains counts on FinishSyncRun) — sync_runs has no dedicated
+	// columns for those per the Phase 0 schema, and the JSONB `details` column
+	// was clearly designed for exactly this kind of run metadata.
+	CreateSyncRun(ctx context.Context, arg CreateSyncRunParams) (SyncRun, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	FinishSyncRun(ctx context.Context, arg FinishSyncRunParams) (SyncRun, error)
 	// Active = not revoked and not expired. Callers should treat "no rows" as
 	// "invalid or already-used token" without distinguishing why, to avoid
 	// leaking timing/existence information.
 	GetActiveRefreshTokenByHash(ctx context.Context, tokenHash string) (RefreshToken, error)
+	GetGameByIDWithTeams(ctx context.Context, id pgtype.UUID) (GetGameByIDWithTeamsRow, error)
 	GetLeagueByID(ctx context.Context, id pgtype.UUID) (League, error)
 	GetLeagueByInviteCode(ctx context.Context, inviteCode string) (League, error)
 	// Excludes removed members by design: this backs requireLeagueMember, where
 	// a removed_at row must behave exactly like "never joined" (403).
 	GetMembershipByLeagueAndUser(ctx context.Context, arg GetMembershipByLeagueAndUserParams) (LeagueMembership, error)
+	GetTeamByID(ctx context.Context, id pgtype.UUID) (Team, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
+	GetWeekByID(ctx context.Context, id pgtype.UUID) (Week, error)
 	LeagueInviteCodeExists(ctx context.Context, inviteCode string) (bool, error)
 	ListActiveMembersWithUser(ctx context.Context, leagueID pgtype.UUID) ([]ListActiveMembersWithUserRow, error)
+	// Joined with both teams' name/conference/logo so clients don't need N+1
+	// lookups per the GET /weeks/:id/games contract.
+	ListGamesByWeekWithTeams(ctx context.Context, weekID pgtype.UUID) ([]ListGamesByWeekWithTeamsRow, error)
 	// Leagues the given user has a non-removed membership in, along with their
 	// role/is_contestant/status in each (GET /leagues needs both in one shot).
 	ListLeaguesForUser(ctx context.Context, userID pgtype.UUID) ([]ListLeaguesForUserRow, error)
+	ListSyncRuns(ctx context.Context, rowLimit int32) ([]SyncRun, error)
+	// conference is an optional exact-match filter: pass a NULL narg to list
+	// every team, or a canonical conference name to filter to it.
+	ListTeams(ctx context.Context, conference pgtype.Text) ([]Team, error)
+	ListWeeksBySeasonYear(ctx context.Context, seasonYear int32) ([]Week, error)
 	// Soft-delete: only affects a currently-active (non-removed) row scoped to
 	// the given league, so this doubles as the "membership belongs to this
 	// league and isn't already removed" check — no rows back means 404/400 to
@@ -42,6 +66,12 @@ type Querier interface {
 	UpdateLeagueInviteCode(ctx context.Context, arg UpdateLeagueInviteCodeParams) (League, error)
 	UpdateLeagueName(ctx context.Context, arg UpdateLeagueNameParams) (League, error)
 	UpdateUserDisplayName(ctx context.Context, arg UpdateUserDisplayNameParams) (User, error)
+	// Match/upsert on external_id (CFBD's game id) per the Phase 3 sync
+	// contract. graded_at is deliberately excluded from the UPDATE SET list —
+	// it's a Phase 5 grading-pipeline idempotency guard this sync must never
+	// touch, so on conflict its existing value (NULL until Phase 5 grades the
+	// game) is left exactly as-is.
+	UpsertGame(ctx context.Context, arg UpsertGameParams) (Game, error)
 	// Handles both fresh joins and rejoin-after-removal against the
 	// UNIQUE(league_id, user_id) constraint in one statement:
 	//   - no existing row                     -> plain INSERT.
@@ -55,6 +85,16 @@ type Querier interface {
 	//     treat "no rows" as "already a member" (409) — this also protects a
 	//     commissioner's own membership from ever being reset by this query.
 	UpsertLeagueMembershipOnJoin(ctx context.Context, arg UpsertLeagueMembershipOnJoinParams) (LeagueMembership, error)
+	// Match/upsert on external_id (CFBD's team id) per the Phase 3 sync
+	// contract. conference is always the *normalized* name (mapped from
+	// CFBD's raw string by internal/schedule's normalization table before this
+	// is ever called) — never CFBD's raw string.
+	UpsertTeam(ctx context.Context, arg UpsertTeamParams) (Team, error)
+	// Match/upsert on (season_year, week_number) per the Phase 3 sync
+	// contract. Weeks carry no other CFBD-sourced fields (the calendar
+	// endpoint's start/end dates aren't part of this schema — see the plan's
+	// Data Model), so the update arm only bumps updated_at.
+	UpsertWeek(ctx context.Context, arg UpsertWeekParams) (Week, error)
 }
 
 var _ Querier = (*Queries)(nil)

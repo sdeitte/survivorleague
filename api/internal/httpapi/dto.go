@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -143,4 +144,168 @@ type invitePreviewResponse struct {
 	LeagueName string `json:"league_name"`
 	Conference string `json:"conference"`
 	SeasonYear int32  `json:"season_year"`
+}
+
+// --- Schedule (Phase 3) ---
+
+type teamResponse struct {
+	ID         string `json:"id"`
+	ExternalID string `json:"external_id"`
+	Name       string `json:"name"`
+	Conference string `json:"conference"`
+	LogoURL    string `json:"logo_url,omitempty"`
+}
+
+func toTeamResponse(t gen.Team) teamResponse {
+	return teamResponse{
+		ID:         db.UUIDString(t.ID),
+		ExternalID: t.ExternalID,
+		Name:       t.Name,
+		Conference: t.Conference,
+		LogoURL:    t.LogoUrl.String,
+	}
+}
+
+type weekResponse struct {
+	ID         string `json:"id"`
+	SeasonYear int32  `json:"season_year"`
+	WeekNumber int32  `json:"week_number"`
+}
+
+func toWeekResponse(w gen.Week) weekResponse {
+	return weekResponse{
+		ID:         db.UUIDString(w.ID),
+		SeasonYear: w.SeasonYear,
+		WeekNumber: w.WeekNumber,
+	}
+}
+
+// gameTeamResponse is a game's home/away team, trimmed to what a picks
+// screen needs — embedded directly in gameResponse so clients never have to
+// make a second request to resolve team names/conference/logo per the
+// GET /weeks/:id/games contract ("include team names/conference so clients
+// don't need N+1 lookups").
+type gameTeamResponse struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Conference string `json:"conference"`
+	LogoURL    string `json:"logo_url,omitempty"`
+}
+
+type gameResponse struct {
+	ID           string           `json:"id"`
+	ExternalID   string           `json:"external_id"`
+	WeekID       string           `json:"week_id"`
+	KickoffAt    string           `json:"kickoff_at"`
+	Status       string           `json:"status"`
+	HomeTeam     gameTeamResponse `json:"home_team"`
+	AwayTeam     gameTeamResponse `json:"away_team"`
+	HomeScore    *int32           `json:"home_score,omitempty"`
+	AwayScore    *int32           `json:"away_score,omitempty"`
+	WinnerTeamID string           `json:"winner_team_id,omitempty"`
+}
+
+func pgInt4Ptr(v pgtype.Int4) *int32 {
+	if !v.Valid {
+		return nil
+	}
+	value := v.Int32
+	return &value
+}
+
+func pgUUIDStringOrEmpty(v pgtype.UUID) string {
+	if !v.Valid {
+		return ""
+	}
+	return db.UUIDString(v)
+}
+
+// toGameResponseFromListRow and toGameResponseFromGetRow map sqlc's two
+// separately-named (but field-for-field identical) joined-game row types —
+// gen.ListGamesByWeekWithTeamsRow (GET /weeks/:id/games) and
+// gen.GetGameByIDWithTeamsRow (GET /games/:id) — to the same gameResponse
+// shape. Kept as two explicit functions rather than one generic/converted
+// helper so a future column added to only one of the two underlying queries
+// doesn't silently misalign a shared struct.
+func toGameResponseFromListRow(g gen.ListGamesByWeekWithTeamsRow) gameResponse {
+	return gameResponse{
+		ID:         db.UUIDString(g.ID),
+		ExternalID: g.ExternalID,
+		WeekID:     db.UUIDString(g.WeekID),
+		KickoffAt:  formatTimestamp(g.KickoffAt),
+		Status:     g.Status,
+		HomeTeam: gameTeamResponse{
+			ID:         db.UUIDString(g.HomeTeamID),
+			Name:       g.HomeTeamName,
+			Conference: g.HomeTeamConference,
+			LogoURL:    g.HomeTeamLogoUrl.String,
+		},
+		AwayTeam: gameTeamResponse{
+			ID:         db.UUIDString(g.AwayTeamID),
+			Name:       g.AwayTeamName,
+			Conference: g.AwayTeamConference,
+			LogoURL:    g.AwayTeamLogoUrl.String,
+		},
+		HomeScore:    pgInt4Ptr(g.HomeScore),
+		AwayScore:    pgInt4Ptr(g.AwayScore),
+		WinnerTeamID: pgUUIDStringOrEmpty(g.WinnerTeamID),
+	}
+}
+
+func toGameResponseFromGetRow(g gen.GetGameByIDWithTeamsRow) gameResponse {
+	return gameResponse{
+		ID:         db.UUIDString(g.ID),
+		ExternalID: g.ExternalID,
+		WeekID:     db.UUIDString(g.WeekID),
+		KickoffAt:  formatTimestamp(g.KickoffAt),
+		Status:     g.Status,
+		HomeTeam: gameTeamResponse{
+			ID:         db.UUIDString(g.HomeTeamID),
+			Name:       g.HomeTeamName,
+			Conference: g.HomeTeamConference,
+			LogoURL:    g.HomeTeamLogoUrl.String,
+		},
+		AwayTeam: gameTeamResponse{
+			ID:         db.UUIDString(g.AwayTeamID),
+			Name:       g.AwayTeamName,
+			Conference: g.AwayTeamConference,
+			LogoURL:    g.AwayTeamLogoUrl.String,
+		},
+		HomeScore:    pgInt4Ptr(g.HomeScore),
+		AwayScore:    pgInt4Ptr(g.AwayScore),
+		WinnerTeamID: pgUUIDStringOrEmpty(g.WinnerTeamID),
+	}
+}
+
+// --- Admin (Phase 3) ---
+
+type triggerScheduleSyncRequest struct {
+	SeasonYear *int32 `json:"season_year"`
+}
+
+type syncRunResponse struct {
+	ID         string          `json:"id"`
+	Kind       string          `json:"kind"`
+	Status     string          `json:"status"`
+	StartedAt  string          `json:"started_at"`
+	FinishedAt string          `json:"finished_at,omitempty"`
+	Error      string          `json:"error,omitempty"`
+	Details    json.RawMessage `json:"details"`
+	CreatedAt  string          `json:"created_at"`
+}
+
+func toSyncRunResponse(r gen.SyncRun) syncRunResponse {
+	resp := syncRunResponse{
+		ID:        db.UUIDString(r.ID),
+		Kind:      r.Kind,
+		Status:    r.Status,
+		StartedAt: formatTimestamp(r.StartedAt),
+		Error:     r.Error.String,
+		Details:   json.RawMessage(r.Details),
+		CreatedAt: formatTimestamp(r.CreatedAt),
+	}
+	if r.FinishedAt.Valid {
+		resp.FinishedAt = formatTimestamp(r.FinishedAt)
+	}
+	return resp
 }

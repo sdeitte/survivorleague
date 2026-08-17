@@ -3,7 +3,12 @@
 Go module for the Survivor League REST API. Phase 1: auth
 (register/login/refresh/logout), `GET`/`PATCH /me`, the
 `requireAuth`/`requireSiteAdmin` middleware, sqlc-generated DB access, and
-the Phase 0 Postgres-backed `/health` check.
+the Phase 0 Postgres-backed `/health` check. Phase 2 added league CRUD,
+membership, and the invite-code join flow. Phase 3 adds CFBD schedule
+ingestion (`internal/schedule`), read-only `/weeks`, `/weeks/:id/games`,
+`/games/:id`, `/teams` endpoints, the first `/admin/*` endpoints
+(`internal/admin` — triggering/viewing a schedule sync, the first real use
+of `requireSiteAdmin`), and a daily cron sync.
 
 See the full plan: `/Users/sdeitte/.claude/plans/witty-questing-barto.md`.
 
@@ -25,6 +30,8 @@ See the full plan: `/Users/sdeitte/.claude/plans/witty-questing-barto.md`.
 | `ADMIN_EMAIL`          | no       | unset                    | If set, a `POST /auth/register` whose `email` case-insensitively matches this gets `is_site_admin=true` auto-set — the site-admin bootstrap path (no manual DB surgery needed). |
 | `CORS_ALLOWED_ORIGIN`  | no       | `http://localhost:5173`  | Single exact origin allowed to call the API with credentials (cookies). Wildcards don't work with `credentials: 'include'` per browser spec. |
 | `PORT`                 | no       | `8080`                   | HTTP port the server listens on |
+| `CFBD_API_KEY`         | no*      | unset                    | Bearer token for CollegeFootballData.com. *Required for a real schedule sync to succeed — without it, `POST /admin/sync/schedule` and the daily cron job still run and record a `sync_runs` row, but the CFBD call itself fails with 401. No live key exists in this repo/environment yet (the old hardcoded key was rotated/abandoned, not carried forward) — see api/internal/schedule's doc comments. |
+| `CFBD_BASE_URL`        | no       | `https://api.collegefootballdata.com` | Override to point the server at a mock CFBD server (e.g. for local E2E testing without a real API key). |
 
 ## Run the server
 
@@ -91,9 +98,36 @@ for exact request/response shapes. Highlights:
 - Web receives the refresh token only via an httpOnly `refresh_token`
   cookie (`SameSite=Strict`, `Secure` when `APP_ENV=production`); mobile
   has no cookie jar and sends/receives it in the JSON body instead.
-- `requireAuth` / `requireSiteAdmin` middleware in `internal/httpapi`.
-  `requireLeagueMember` / `requireCommissioner` are not built yet — they
-  need `league_memberships` and league routes, which land in Phase 2.
+- `requireAuth` / `requireSiteAdmin` / `requireLeagueMember` /
+  `requireCommissioner` middleware in `internal/httpapi`.
+
+## Schedule endpoints (Phase 3)
+
+`GET /weeks?season_year=`, `GET /weeks/:id/games`, `GET /games/:id`,
+`GET /teams?conference=` — all `requireAuth`, shared across every league
+(not conference-scoped; a league's conference only filters what its own
+picks UI shows, in a later phase). Populated by CFBD schedule sync, not
+hand-entered.
+
+## Admin endpoints (Phase 3)
+
+`POST /admin/sync/schedule` (body: `{"season_year": 2025}`, required, no
+implicit default) and `GET /admin/sync/runs` — both `requireSiteAdmin`. The
+sync endpoint runs synchronously, upserts teams/weeks/games via
+`internal/schedule`'s `Service.SyncSeason`, and always records a
+`sync_runs` row plus (on success) an `audit_log` row
+(`action=schedule_sync`). A daily cron job (`robfig/cron/v3`, wired in
+`cmd/server/main.go`, 6:00 AM America/New_York) runs the same sync
+automatically for "the current season" (see `currentSeasonYear` in
+`main.go`) — additive to the manual endpoint, not a replacement, and
+cleanly stopped on server shutdown (`SIGINT`/`SIGTERM`).
+
+CFBD's API schema (teams/calendar/games field names, auth via a bearer
+token) was confirmed against the live OpenAPI 3.1 spec at
+https://api.collegefootballdata.com/api-docs.json — no API key is needed to
+fetch the spec itself. `internal/schedule`'s tests mock CFBD entirely via
+`httptest.Server` with hand-authored fixture JSON matching that schema; no
+live network calls happen in `go test`.
 
 ## Build / vet / test
 
@@ -113,10 +147,18 @@ internal/
                rotation, the Service that register/login/refresh/logout
                and GET/PATCH /me are built on
   db/          sqlc config output (gen/) plus pgtype/UUID + pool helpers
-  httpapi/     chi routes, middleware (requireAuth/requireSiteAdmin),
-               HTTP handlers, request/response DTOs
-  leagues, picks, schedule, grading, notify, admin — empty stubs, filled in
-               phase-by-phase per the roadmap
+  httpapi/     chi routes, middleware (requireAuth/requireSiteAdmin/
+               requireLeagueMember/requireCommissioner), HTTP handlers,
+               request/response DTOs
+  leagues/     league CRUD, membership, invite-code join flow (Phase 2)
+  schedule/    CFBD client + idempotent teams/weeks/games sync, canonical
+               FBS conference list + CFBD conference-name normalization,
+               read access for GET /weeks, /weeks/:id/games, /games/:id,
+               /teams (Phase 3)
+  admin/       site-admin schedule-sync trigger + sync_runs/audit_log
+               bookkeeping (Phase 3); cross-league oversight lands Phase 8
+  picks, grading, notify — empty stubs, filled in phase-by-phase per the
+               roadmap
 migrations/    goose SQL migrations
 openapi/       openapi.yaml, the source-of-truth API spec
 sqlc.yaml      sqlc codegen config

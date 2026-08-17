@@ -7,11 +7,13 @@ info:
     packages/api-client (consumed by both web and mobile).
 
     Phase 1 added auth (register/login/refresh/logout) and the current-user
-    endpoints. Phase 2 adds league CRUD, membership, the invite-code join
-    flow, and the conferences list. Schedule, picks, leaderboard, and admin
-    are added incrementally in later phases per the roadmap — see
-    /Users/sdeitte/.claude/plans/witty-questing-barto.md.
-  version: 0.2.0
+    endpoints. Phase 2 added league CRUD, membership, the invite-code join
+    flow, and the conferences list. Phase 3 adds read-only schedule
+    endpoints (weeks/games/teams, populated by a CFBD sync) and the first
+    site-admin endpoints (triggering/viewing that sync). Picks, leaderboard,
+    and the rest of site-admin are added incrementally in later phases per
+    the roadmap — see /Users/sdeitte/.claude/plans/witty-questing-barto.md.
+  version: 0.3.0
 servers:
   - url: http://localhost:8080
     description: Local development
@@ -649,6 +651,228 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /weeks:
+    get:
+      operationId: listWeeks
+      summary: List a season's weeks
+      description: >
+        Weeks are global per season (shared across every league, not
+        conference-scoped) — populated by the CFBD schedule sync
+        (POST /admin/sync/schedule), regular season only.
+      tags:
+        - Schedule
+      parameters:
+        - name: season_year
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The season's weeks, ordered by week_number
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Week"
+        "400":
+          description: Missing or non-integer season_year
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing, invalid, or expired access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /weeks/{id}/games:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: listWeekGames
+      summary: List a week's games
+      description: >
+        Includes both teams' name/conference/logo inline so clients don't
+        need N+1 lookups to render a picks screen.
+      tags:
+        - Schedule
+      responses:
+        "200":
+          description: The week's games, ordered by kickoff_at
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Game"
+        "401":
+          description: Missing, invalid, or expired access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Week not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /games/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getGame
+      summary: Get a single game's detail
+      tags:
+        - Schedule
+      responses:
+        "200":
+          description: Game detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Game"
+        "401":
+          description: Missing, invalid, or expired access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Game not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /teams:
+    get:
+      operationId: listTeams
+      summary: List FBS teams
+      description: >
+        Populated by the CFBD schedule sync. `conference` filters to an
+        exact (case-sensitive) match against the canonical FBS conference
+        names (see GET /conferences); omit it to list every FBS team across
+        every conference.
+      tags:
+        - Schedule
+      parameters:
+        - name: conference
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Teams matching the filter, ordered by name
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Team"
+        "401":
+          description: Missing, invalid, or expired access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/sync/schedule:
+    post:
+      operationId: triggerScheduleSync
+      summary: Manually trigger a CFBD schedule sync (site admin only)
+      description: >
+        Requires is_site_admin=true (requireSiteAdmin). Runs synchronously:
+        pulls FBS teams, the regular-season calendar, and regular-season
+        games for `season_year` from CollegeFootballData.com and
+        idempotently upserts teams/weeks/games. Always records a
+        `sync_runs` row (whether the CFBD call succeeds or fails) and, on
+        success, an `audit_log` row (action=schedule_sync). This endpoint
+        is additive to the daily cron sync in cmd/server, not a replacement
+        for it.
+      tags:
+        - Admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TriggerScheduleSyncRequest"
+      responses:
+        "200":
+          description: >
+            The sync_runs record for this run. status=success or
+            status=failed (see the `error` field) — a failed CFBD call
+            still returns 200 with the recorded failure, since the admin
+            action itself (recording the attempt) succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncRun"
+        "400":
+          description: Missing or out-of-range season_year
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing, invalid, or expired access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not a site admin
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/sync/runs:
+    get:
+      operationId: listSyncRuns
+      summary: List recent sync runs (site admin only)
+      description: Requires is_site_admin=true (requireSiteAdmin). Newest first.
+      tags:
+        - Admin
+      responses:
+        "200":
+          description: Recent sync runs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SyncRun"
+        "401":
+          description: Missing, invalid, or expired access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Not a site admin
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -903,3 +1127,148 @@ components:
           type: string
         season_year:
           type: integer
+
+    Team:
+      type: object
+      required:
+        - id
+        - external_id
+        - name
+        - conference
+      properties:
+        id:
+          type: string
+          format: uuid
+        external_id:
+          type: string
+          description: CFBD's team id, stored as-is (no id-mangling).
+        name:
+          type: string
+        conference:
+          type: string
+          description: >
+            The *normalized* conference name (see
+            internal/schedule/conferences.go) — always one of the canonical
+            names returned by GET /conferences, never CFBD's raw string.
+        logo_url:
+          type: string
+
+    Week:
+      type: object
+      required:
+        - id
+        - season_year
+        - week_number
+      properties:
+        id:
+          type: string
+          format: uuid
+        season_year:
+          type: integer
+        week_number:
+          type: integer
+
+    GameTeam:
+      type: object
+      description: A game's home or away team, trimmed for inline embedding.
+      required:
+        - id
+        - name
+        - conference
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        conference:
+          type: string
+        logo_url:
+          type: string
+
+    Game:
+      type: object
+      required:
+        - id
+        - external_id
+        - week_id
+        - kickoff_at
+        - status
+        - home_team
+        - away_team
+      properties:
+        id:
+          type: string
+          format: uuid
+        external_id:
+          type: string
+          description: CFBD's game id, stored as-is.
+        week_id:
+          type: string
+          format: uuid
+        kickoff_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [scheduled, in_progress, final, postponed, canceled]
+        home_team:
+          $ref: "#/components/schemas/GameTeam"
+        away_team:
+          $ref: "#/components/schemas/GameTeam"
+        home_score:
+          type: integer
+        away_score:
+          type: integer
+        winner_team_id:
+          type: string
+          format: uuid
+
+    TriggerScheduleSyncRequest:
+      type: object
+      required:
+        - season_year
+      properties:
+        season_year:
+          type: integer
+          minimum: 2000
+          maximum: 2100
+          description: No implicit default — the admin must always specify which season to sync.
+
+    SyncRun:
+      type: object
+      description: >
+        A single schedule-sync attempt (manual or cron-triggered).
+        `details` carries trigger/triggered_by/season_year and, once
+        finished, the sync result counts (teams/weeks/games
+        upserted/skipped) — see internal/admin/service.go's syncRunDetails.
+      required:
+        - id
+        - kind
+        - status
+        - started_at
+        - details
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [schedule]
+        status:
+          type: string
+          enum: [running, success, failed]
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+        error:
+          type: string
+        details:
+          type: object
+        created_at:
+          type: string
+          format: date-time

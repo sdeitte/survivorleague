@@ -207,3 +207,59 @@ func TestRouteTable_InvitesAndTopLevelLeagueRoutes(t *testing.T) {
 		t.Errorf("expected to check 3 auth-only routes (POST /invites/{code}/join, POST /leagues, GET /leagues), checked %d", checkedAuthOnly)
 	}
 }
+
+// TestRouteTable_AdminRoutesRequireSiteAdmin is the Phase 3 extension of the
+// plan's "Auth & RBAC" regression-guard pattern: Phase 1 built
+// requireSiteAdmin with no /admin/* routes yet to test against (see its doc
+// comment in middleware.go); Phase 3 is the first phase to add any. This is
+// a direct guard against the old app's exact failure mode — "Admin
+// endpoints have zero auth checks — wide open in production" — for the
+// route table's newest, most sensitive section.
+func TestRouteTable_AdminRoutesRequireSiteAdmin(t *testing.T) {
+	entries := walkRoutes(t, buildTestRouter(t))
+
+	checked := 0
+	for _, e := range entries {
+		if !strings.HasPrefix(e.route, "/admin") {
+			continue
+		}
+		checked++
+		if !hasMiddleware(e.middlewares, "RequireSiteAdmin") {
+			t.Errorf("%s %s does not carry RequireSiteAdmin; middlewares=%v", e.method, e.route, e.middlewares)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no /admin/... routes found in the route table — has the route table changed shape?")
+	}
+}
+
+// TestRouteTable_ScheduleRoutesRequireAuth checks the Phase 3 read-only
+// schedule endpoints (shared across leagues, not league-scoped) all require
+// at least requireAuth — they're deliberately not requireLeagueMember since
+// weeks/games/teams data isn't scoped to any one league.
+func TestRouteTable_ScheduleRoutesRequireAuth(t *testing.T) {
+	entries := walkRoutes(t, buildTestRouter(t))
+
+	want := map[string]bool{
+		"GET /weeks":            false,
+		"GET /weeks/{id}/games": false,
+		"GET /games/{id}":       false,
+		"GET /teams":            false,
+	}
+
+	for _, e := range entries {
+		key := e.method + " " + e.route
+		if _, tracked := want[key]; !tracked {
+			continue
+		}
+		want[key] = true
+		if !hasMiddleware(e.middlewares, "RequireAuth") {
+			t.Errorf("%s does not carry RequireAuth; middlewares=%v", key, e.middlewares)
+		}
+	}
+	for key, seen := range want {
+		if !seen {
+			t.Errorf("expected schedule route %q not found in route table", key)
+		}
+	}
+}
