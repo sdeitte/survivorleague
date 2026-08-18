@@ -48,8 +48,14 @@ func newTestQueries(t *testing.T) *gen.Queries {
 // seasonYearCounter hands out a distinct season_year per test so tests in
 // this file (and repeated runs against a persistent dev database) never
 // collide on the (season_year, week_number)/external_id upsert keys —
-// starting well outside any real college football season year.
-var seasonYearCounter = 90000
+// starting well outside any real college football season year. Seeded
+// from the wall clock (not a fixed literal) so repeated `go test` runs
+// against the same un-truncated dev database don't replay the same
+// season_year sequence and collide with a prior run's leftover rows —
+// internal/grading/service_test.go hit this exact flake once already
+// with the same pattern; fixing it here too rather than waiting to hit
+// it again.
+var seasonYearCounter = 90000 + int(time.Now().UnixNano()%40000)
 
 func uniqueSeasonYear() int {
 	seasonYearCounter++

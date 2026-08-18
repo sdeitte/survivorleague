@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useAuth } from '../auth/AuthContext';
+import { BrandWordmark } from '../components/BrandWordmark';
 import * as api from '../api';
 import { ApiError, type AvailableTeam, type Pick, type Week } from '../api';
 
@@ -15,6 +16,7 @@ export function PicksScreen({ leagueId, onBack }: { leagueId: string; onBack: ()
   const queryClient = useQueryClient();
   const [selectedWeekId, setSelectedWeekId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [weekPickerOpen, setWeekPickerOpen] = useState(false);
 
   const leagueQuery = useQuery({
     queryKey: ['league', leagueId],
@@ -27,33 +29,22 @@ export function PicksScreen({ leagueId, onBack }: { leagueId: string; onBack: ()
     enabled: !!leagueQuery.data,
   });
 
-  // Default to the "current" week: the earliest week with at least one
-  // not-yet-kicked-off game in the league's conference. Falls back to the
-  // last week if the season's fully underway, or the first if there's no
-  // schedule data at all yet.
-  const currentWeekDetectQuery = useQuery({
-    queryKey: ['league', leagueId, 'current-week-detect', weeksQuery.data?.map((w) => w.id).join(',')],
-    queryFn: async () => {
-      const weeks = weeksQuery.data!;
-      const now = Date.now();
-      for (const week of weeks) {
-        const res = await authFetch((token) => api.getAvailableTeams(token, leagueId, week.id)).catch(() => ({
-          teams: [] as AvailableTeam[],
-        }));
-        if (res.teams.some((t) => new Date(t.kickoff_at).getTime() > now)) {
-          return week.id;
-        }
-      }
-      return weeks.length > 0 ? weeks[weeks.length - 1].id : null;
-    },
-    enabled: !!weeksQuery.data && weeksQuery.data.length > 0 && selectedWeekId === null,
+  // Default to the week that's currently occurring schedule-wise for the
+  // league's conference — one request to the server (which already knows
+  // every week's kickoff range), not a client-side scan across every
+  // week's available-teams.
+  const currentWeekQuery = useQuery({
+    queryKey: ['league', leagueId, 'current-week'],
+    queryFn: () => authFetch((token) => api.getCurrentWeek(token, leagueId)),
+    enabled: selectedWeekId === null,
+    retry: false, // a 404 (no schedule data yet) is an expected, terminal state, not worth retrying
   });
 
   useEffect(() => {
-    if (selectedWeekId === null && currentWeekDetectQuery.data) {
-      setSelectedWeekId(currentWeekDetectQuery.data);
+    if (selectedWeekId === null && currentWeekQuery.data) {
+      setSelectedWeekId(currentWeekQuery.data.id);
     }
-  }, [selectedWeekId, currentWeekDetectQuery.data]);
+  }, [selectedWeekId, currentWeekQuery.data]);
 
   const weekId = selectedWeekId ?? undefined;
 
@@ -88,6 +79,14 @@ export function PicksScreen({ leagueId, onBack }: { leagueId: string; onBack: ()
   const teamNameById = useMemo(() => {
     const map = new Map<string, string>();
     for (const t of availableTeamsQuery.data?.teams ?? []) map.set(t.team_id, t.team_name);
+    return map;
+  }, [availableTeamsQuery.data]);
+
+  const teamLogoById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const t of availableTeamsQuery.data?.teams ?? []) {
+      if (t.team_logo_url) map.set(t.team_id, t.team_logo_url);
+    }
     return map;
   }, [availableTeamsQuery.data]);
 
@@ -158,9 +157,19 @@ export function PicksScreen({ leagueId, onBack }: { leagueId: string; onBack: ()
   const league = leagueQuery.data;
   const weeks: Week[] = weeksQuery.data ?? [];
   const selectedWeek = weeks.find((w) => w.id === weekId);
+  const selectedIndex = weeks.findIndex((w) => w.id === weekId);
+  const goToOffset = (offset: number) => {
+    if (selectedIndex < 0) return;
+    const next = weeks[selectedIndex + offset];
+    if (next) setSelectedWeekId(next.id);
+  };
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <View style={styles.brandRow}>
+        <BrandWordmark size={90} />
+      </View>
+
       <Pressable onPress={onBack}>
         <Text style={styles.backLink}>← {league.name}</Text>
       </Pressable>
@@ -173,20 +182,51 @@ export function PicksScreen({ leagueId, onBack }: { leagueId: string; onBack: ()
       {weeks.length === 0 ? (
         <Text style={styles.subtitle}>No schedule data yet — check back once weeks are synced.</Text>
       ) : (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.weekRow}>
-          {weeks.map((week) => (
-            <Pressable
-              key={week.id}
-              onPress={() => setSelectedWeekId(week.id)}
-              style={[styles.weekButton, week.id === weekId && styles.weekButtonSelected]}
-            >
-              <Text style={[styles.weekButtonText, week.id === weekId && styles.weekButtonTextSelected]}>
-                Wk {week.week_number}
-              </Text>
-            </Pressable>
-          ))}
-        </ScrollView>
+        <View style={styles.stepper}>
+          <Pressable
+            onPress={() => goToOffset(-1)}
+            disabled={selectedIndex <= 0}
+            style={[styles.stepperArrow, selectedIndex <= 0 && styles.stepperArrowDisabled]}
+          >
+            <Text style={styles.stepperArrowText}>‹</Text>
+          </Pressable>
+          <Pressable onPress={() => setWeekPickerOpen(true)} style={styles.stepperLabel}>
+            <Text style={styles.stepperLabelText}>{selectedWeek ? `Week ${selectedWeek.week_number}` : 'Select week'}</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => goToOffset(1)}
+            disabled={selectedIndex < 0 || selectedIndex >= weeks.length - 1}
+            style={[styles.stepperArrow, (selectedIndex < 0 || selectedIndex >= weeks.length - 1) && styles.stepperArrowDisabled]}
+          >
+            <Text style={styles.stepperArrowText}>›</Text>
+          </Pressable>
+        </View>
       )}
+
+      <Modal visible={weekPickerOpen} animationType="slide" transparent onRequestClose={() => setWeekPickerOpen(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setWeekPickerOpen(false)}>
+          <View style={styles.modalSheet}>
+            <Text style={styles.modalTitle}>Select a week</Text>
+            <FlatList
+              data={weeks}
+              keyExtractor={(w) => w.id}
+              renderItem={({ item }) => (
+                <Pressable
+                  onPress={() => {
+                    setSelectedWeekId(item.id);
+                    setWeekPickerOpen(false);
+                  }}
+                  style={[styles.modalRow, item.id === weekId && styles.modalRowSelected]}
+                >
+                  <Text style={[styles.modalRowText, item.id === weekId && styles.modalRowTextSelected]}>
+                    Week {item.week_number}
+                  </Text>
+                </Pressable>
+              )}
+            />
+          </View>
+        </Pressable>
+      </Modal>
 
       {actionError && (
         <View style={styles.errorBox}>
@@ -205,20 +245,27 @@ export function PicksScreen({ leagueId, onBack }: { leagueId: string; onBack: ()
                     Your pick — {selectedWeek ? `Week ${selectedWeek.week_number}` : 'this week'}
                   </Text>
                   {pickedTeam ? (
-                    <>
-                      <Text style={styles.currentPickTeam}>{pickedTeam.team_name}</Text>
-                      <Text style={styles.currentPickMeta}>
-                        {pickedTeam.is_home ? 'vs' : '@'} {pickedTeam.opponent_name} ·{' '}
-                        {new Date(pickedTeam.kickoff_at).toLocaleString(undefined, {
-                          weekday: 'short',
-                          month: 'short',
-                          day: 'numeric',
-                          hour: 'numeric',
-                          minute: '2-digit',
-                        })}
-                      </Text>
-                      {pickedTeam.is_locked && <Text style={styles.currentPickLocked}>Locked</Text>}
-                    </>
+                    <View style={styles.currentPickRow}>
+                      {pickedTeam.team_logo_url && (
+                        <View style={styles.currentPickLogoBackdrop}>
+                          <Image source={{ uri: pickedTeam.team_logo_url }} style={styles.currentPickLogo} />
+                        </View>
+                      )}
+                      <View style={styles.currentPickTextCol}>
+                        <Text style={styles.currentPickTeam}>{pickedTeam.team_name}</Text>
+                        <Text style={styles.currentPickMeta}>
+                          {pickedTeam.is_home ? 'vs' : '@'} {pickedTeam.opponent_name} ·{' '}
+                          {new Date(pickedTeam.kickoff_at).toLocaleString(undefined, {
+                            weekday: 'short',
+                            month: 'short',
+                            day: 'numeric',
+                            hour: 'numeric',
+                            minute: '2-digit',
+                          })}
+                        </Text>
+                        {pickedTeam.is_locked && <Text style={styles.currentPickLocked}>Locked</Text>}
+                      </View>
+                    </View>
                   ) : (
                     <Text style={styles.currentPickMeta}>Saved</Text>
                   )}
@@ -255,6 +302,11 @@ export function PicksScreen({ leagueId, onBack }: { leagueId: string; onBack: ()
                     disabled && !team.is_current_pick && styles.teamRowDisabled,
                   ]}
                 >
+                  {team.team_logo_url && (
+                    <View style={styles.teamRowLogoBackdrop}>
+                      <Image source={{ uri: team.team_logo_url }} style={styles.teamRowLogo} />
+                    </View>
+                  )}
                   <View style={styles.teamRowText}>
                     <Text style={styles.teamName}>
                       {team.team_name}
@@ -294,7 +346,14 @@ export function PicksScreen({ leagueId, onBack }: { leagueId: string; onBack: ()
                   <Text style={styles.memberName}>{status.display_name}</Text>
                   {status.has_picked ? (
                     status.team_id ? (
-                      <Text style={styles.pickedTeam}>{teamNameById.get(status.team_id) ?? 'Picked'}</Text>
+                      <View style={styles.pickedTeamRow}>
+                        {teamLogoById.get(status.team_id) && (
+                          <View style={styles.pickedTeamLogoBackdrop}>
+                            <Image source={{ uri: teamLogoById.get(status.team_id) }} style={styles.pickedTeamLogo} />
+                          </View>
+                        )}
+                        <Text style={styles.pickedTeam}>{teamNameById.get(status.team_id) ?? 'Picked'}</Text>
+                      </View>
                     ) : (
                       <Text style={styles.pickedHidden}>Picked (hidden until kickoff)</Text>
                     )
@@ -312,6 +371,10 @@ export function PicksScreen({ leagueId, onBack }: { leagueId: string; onBack: ()
 }
 
 const styles = StyleSheet.create({
+  brandRow: {
+    alignItems: 'center',
+    marginBottom: 12,
+  },
   container: {
     flex: 1,
     backgroundColor: '#0f172a',
@@ -343,28 +406,73 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginBottom: 4,
   },
-  weekRow: {
+  stepper: {
     flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
     marginBottom: 4,
   },
-  weekButton: {
+  stepperArrow: {
     borderWidth: 1,
     borderColor: '#334155',
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    marginRight: 6,
   },
-  weekButtonSelected: {
-    backgroundColor: '#f1f5f9',
-    borderColor: '#f1f5f9',
+  stepperArrowDisabled: {
+    opacity: 0.3,
   },
-  weekButtonText: {
+  stepperArrowText: {
     color: '#cbd5e1',
-    fontSize: 13,
+    fontSize: 16,
   },
-  weekButtonTextSelected: {
-    color: '#0f172a',
+  stepperLabel: {
+    borderWidth: 1,
+    borderColor: '#334155',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    minWidth: 110,
+    alignItems: 'center',
+  },
+  stepperLabelText: {
+    color: '#f1f5f9',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: '#00000099',
+    justifyContent: 'flex-end',
+  },
+  modalSheet: {
+    backgroundColor: '#1e293b',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    padding: 16,
+    maxHeight: '70%',
+  },
+  modalTitle: {
+    color: '#f1f5f9',
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  modalRow: {
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+  },
+  modalRowSelected: {
+    backgroundColor: '#0f172a',
+  },
+  modalRowText: {
+    color: '#cbd5e1',
+    fontSize: 14,
+  },
+  modalRowTextSelected: {
+    color: '#f1f5f9',
     fontWeight: '600',
   },
   errorBox: {
@@ -407,6 +515,28 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
   },
+  currentPickRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  currentPickLogoBackdrop: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  currentPickLogo: {
+    width: 60,
+    height: 60,
+    resizeMode: 'contain',
+  },
+  currentPickTextCol: {
+    flex: 1,
+    gap: 2,
+  },
   sectionTitle: {
     color: '#f1f5f9',
     fontSize: 14,
@@ -430,6 +560,20 @@ const styles = StyleSheet.create({
   },
   teamRowText: {
     flex: 1,
+  },
+  teamRowLogoBackdrop: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  teamRowLogo: {
+    width: 42,
+    height: 42,
+    resizeMode: 'contain',
   },
   teamName: {
     color: '#f1f5f9',
@@ -466,6 +610,24 @@ const styles = StyleSheet.create({
   memberName: {
     color: '#f1f5f9',
     fontSize: 14,
+  },
+  pickedTeamRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  pickedTeamLogoBackdrop: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pickedTeamLogo: {
+    width: 22,
+    height: 22,
+    resizeMode: 'contain',
   },
   pickedTeam: {
     color: '#34d399',

@@ -793,6 +793,49 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /leagues/{id}/current-week:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getLeagueCurrentWeek
+      summary: Get the week currently occurring, schedule-wise, for this league's conference
+      description: >
+        Requires a non-removed membership in the league (requireLeagueMember).
+        Returns the week whose games' kickoff window (earliest to latest
+        kickoff among that week's games for the league's conference)
+        brackets the current time. If now falls in the gap between one
+        week's games ending and the next week's starting, returns the
+        upcoming week (not the one that just finished). Falls back to the
+        first week if called before the season starts, or the last week
+        if called after the season ends. Backs the picks screen's default
+        week selection.
+      tags:
+        - Leagues
+      responses:
+        "200":
+          description: The current week
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Week"
+        "403":
+          description: Not a member of this league
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: League not found, or no schedule data synced yet for this league's conference/season
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /leagues/{id}/members/{membershipId}:
     parameters:
       - name: id

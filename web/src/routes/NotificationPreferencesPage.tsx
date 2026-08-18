@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
+import { BrandWordmark } from '../components/BrandWordmark'
 import { ApiError, getNotificationPreferences, updateNotificationPreferences } from '../api'
 import type { NotificationPreferences } from '../api'
 
@@ -55,16 +56,20 @@ export function NotificationPreferencesPage() {
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 p-6">
       <div className="max-w-lg mx-auto space-y-4">
+        <div className="flex justify-center text-lg">
+          <BrandWordmark size={200} />
+        </div>
+
         <Link to="/" className="text-xs text-slate-500 underline">
           ← Home
         </Link>
 
         <div>
           <h1 className="text-xl font-semibold">Notification preferences</h1>
-          <p className="text-sm text-slate-400">Choose what you get notified about, and how.</p>
+          <p className="text-sm text-slate-500">Choose what you get notified about, and how.</p>
         </div>
 
-        {prefsQuery.isLoading && <p className="text-sm text-slate-400">Loading preferences…</p>}
+        {prefsQuery.isLoading && <p className="text-sm text-slate-500">Loading preferences…</p>}
         {prefsQuery.error && (
           <p className="text-sm text-red-400">
             {prefsQuery.error instanceof ApiError ? prefsQuery.error.message : 'Could not load your preferences.'}

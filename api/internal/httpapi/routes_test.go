@@ -113,10 +113,12 @@ func TestRouteTable_CommissionerOnlyRoutesRequireCommissioner(t *testing.T) {
 
 	want := map[string]bool{
 		"PATCH /leagues/{id}/":                              false,
+		"DELETE /leagues/{id}/":                             false,
 		"DELETE /leagues/{id}/members/{membershipId}":       false,
 		"POST /leagues/{id}/members/{membershipId}/buyback": false,
 		"GET /leagues/{id}/invite":                          false,
 		"POST /leagues/{id}/invite/regenerate":              false,
+		"POST /leagues/{id}/invite/send":                    false,
 	}
 
 	for _, e := range entries {
@@ -269,6 +271,49 @@ func TestRouteTable_Phase8AdminRoutesRequireSiteAdmin(t *testing.T) {
 	for key, seen := range want {
 		if !seen {
 			t.Errorf("expected Phase 8 admin route %q not found in route table", key)
+		}
+	}
+}
+
+// TestRouteTable_MutatingRoutesRequireLeagueOpen is a regression guard for
+// the league-close feature: every route that mutates a league's own state
+// once it exists (name/contestant-toggle updates, member removal, buy-back,
+// invite regeneration, submitting a pick) must carry RequireLeagueOpen so a
+// closed league truly locks out further changes. DELETE /leagues/{id}/
+// itself — the close action — is deliberately excluded: it must stay
+// reachable on an already-closed league so leagues.Service.CloseLeague can
+// return its clean "already closed" 409 instead of a generic 403.
+func TestRouteTable_MutatingRoutesRequireLeagueOpen(t *testing.T) {
+	entries := walkRoutes(t, buildTestRouter(t))
+
+	want := map[string]bool{
+		"PATCH /leagues/{id}/":                              false,
+		"DELETE /leagues/{id}/members/{membershipId}":       false,
+		"POST /leagues/{id}/members/{membershipId}/buyback": false,
+		"POST /leagues/{id}/invite/regenerate":              false,
+		"POST /leagues/{id}/invite/send":                    false,
+		"PUT /leagues/{id}/weeks/{weekId}/picks/me":         false,
+	}
+
+	for _, e := range entries {
+		key := e.method + " " + e.route
+		if _, tracked := want[key]; !tracked {
+			continue
+		}
+		want[key] = true
+		if !hasMiddleware(e.middlewares, "RequireLeagueOpen") {
+			t.Errorf("%s does not carry RequireLeagueOpen; middlewares=%v", key, e.middlewares)
+		}
+	}
+	for key, seen := range want {
+		if !seen {
+			t.Errorf("expected mutating route %q not found in route table", key)
+		}
+	}
+
+	for _, e := range entries {
+		if e.method+" "+e.route == "DELETE /leagues/{id}/" && hasMiddleware(e.middlewares, "RequireLeagueOpen") {
+			t.Error("DELETE /leagues/{id}/ (close league) must not carry RequireLeagueOpen — it needs to work on an already-closed league")
 		}
 	}
 }

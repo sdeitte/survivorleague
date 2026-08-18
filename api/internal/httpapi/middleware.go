@@ -117,6 +117,30 @@ func (a *API) RequireLeagueMember(next http.Handler) http.Handler {
 	}))
 }
 
+// RequireLeagueOpen rejects the request with 403 if the league's status is
+// 'closed'. Must be chained after RequireLeagueMember (or
+// RequireCommissioner), which is what populates LeagueContext — e.g.
+// `r.With(a.RequireCommissioner, a.RequireLeagueOpen)`. Deliberately not
+// folded into RequireLeagueMember itself: read-only routes (get league,
+// members, leaderboard, pick history) must keep working on a closed
+// league — see internal/leagues.Service.CloseLeague's doc comment — only
+// mutating routes (picks, buy-back, remove member, invite regeneration,
+// league updates) carry this.
+func (a *API) RequireLeagueOpen(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lc, ok := LeagueFromContext(r.Context())
+		if !ok {
+			writeError(w, http.StatusForbidden, "not a member of this league")
+			return
+		}
+		if lc.League.Status == "closed" {
+			writeError(w, http.StatusForbidden, "this league is closed")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // RequireCommissioner wraps RequireLeagueMember, additionally requiring
 // role='commissioner' on the caller's membership (403 otherwise). Since it
 // wraps RequireLeagueMember, any route carrying RequireCommissioner also

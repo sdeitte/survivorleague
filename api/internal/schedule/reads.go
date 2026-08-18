@@ -105,6 +105,78 @@ func (s *Service) IsEligibleConference(ctx context.Context, name string) (bool, 
 	return false, nil
 }
 
+// ErrNoScheduleData is returned by CurrentWeek when the league's
+// conference has no synced games for its season yet.
+var ErrNoScheduleData = errors.New("schedule: no games synced for this season/conference yet")
+
+// CurrentWeek picks the week that is "currently occurring" schedule-wise
+// for conference's games in seasonYear, as of now:
+//   - if now falls within some week's kickoff window (its earliest game's
+//     kickoff through its latest game's kickoff), that week is current;
+//   - otherwise now is in the gap between one week ending and the next
+//     starting (e.g. a Monday between game weeks) — default FORWARD to
+//     the next upcoming week, not back to the one that just finished;
+//   - if now is after every week's window (season over), fall back to
+//     the last week;
+//   - if now is before every week's window (preseason), fall back to the
+//     first week.
+//
+// This replaces a much heavier N-request client-side loop (fetch
+// available-teams for every week in order until one has a future game)
+// with a single query + a small, testable selection rule.
+func (s *Service) CurrentWeek(ctx context.Context, seasonYear int32, conference string, now time.Time) (gen.ListWeekKickoffRangesForConferenceRow, error) {
+	rows, err := s.queries.ListWeekKickoffRangesForConference(ctx, gen.ListWeekKickoffRangesForConferenceParams{
+		SeasonYear: seasonYear,
+		Conference: conference,
+	})
+	if err != nil {
+		return gen.ListWeekKickoffRangesForConferenceRow{}, err
+	}
+	if len(rows) == 0 {
+		return gen.ListWeekKickoffRangesForConferenceRow{}, ErrNoScheduleData
+	}
+
+	for _, r := range rows {
+		if !now.Before(r.MinKickoff.Time) && !now.After(r.MaxKickoff.Time) {
+			return r, nil
+		}
+	}
+	for _, r := range rows {
+		if now.Before(r.MinKickoff.Time) {
+			return r, nil
+		}
+	}
+	return rows[len(rows)-1], nil
+}
+
+// IsFirstWeekPickableForConference reports whether conference's/
+// seasonYear's first week (lowest week_number) still has at least one game
+// that hasn't kicked off yet, as of now — i.e. whether a brand-new league
+// member would have any team left to pick for week 1. Once every week 1
+// game has kicked off, a new joiner has nothing to pick for their first
+// week, so this backs the "lock joins once week 1 is unpickable" rule
+// (POST /invites/{code}/join, and GET /invites/{code}'s preview). Mirrors
+// isKickedOff's exact "kickoff <= now means locked" comparison
+// (internal/picks/service.go) so this stays consistent with the pick-lock
+// rule itself. A conference/season with no synced schedule data yet is
+// treated as pickable — joining should never be blocked for a reason
+// nobody could see coming.
+func (s *Service) IsFirstWeekPickableForConference(ctx context.Context, seasonYear int32, conference string, now time.Time) (bool, error) {
+	rows, err := s.queries.ListWeekKickoffRangesForConference(ctx, gen.ListWeekKickoffRangesForConferenceParams{
+		SeasonYear: seasonYear,
+		Conference: conference,
+	})
+	if err != nil {
+		return false, err
+	}
+	if len(rows) == 0 {
+		return true, nil
+	}
+	// Rows are ORDER BY week_number ASC (see the query) — the first row is
+	// week 1.
+	return now.Before(rows[0].MaxKickoff.Time), nil
+}
+
 // ListLiveWindowWeeks returns the distinct (season_year, week_number)
 // pairs among games currently inside the live poll window: kicked off
 // on-or-before now, but not so long ago that they've fallen out the far

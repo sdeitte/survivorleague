@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useAuth } from '../auth/AuthContext';
+import { BrandWordmark } from '../components/BrandWordmark';
 import * as api from '../api';
 import { ApiError, type LeaderboardEntry, type MembershipWeekPick } from '../api';
 
@@ -21,6 +22,10 @@ export function LeaderboardScreen({ leagueId, onBack }: { leagueId: string; onBa
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <View style={styles.brandRow}>
+        <BrandWordmark size={90} />
+      </View>
+
       <Pressable onPress={onBack}>
         <Text style={styles.backLink}>← League</Text>
       </Pressable>
@@ -126,9 +131,16 @@ function WeekPickRow({ pick }: { pick: MembershipWeekPick }) {
         {!pick.has_picked ? (
           <Text style={styles.notPicked}>Not picked</Text>
         ) : revealed ? (
-          <Text style={styles.pickedTeam}>
-            {pick.team_name} <Text style={styles.opponentText}>{pick.is_home ? 'vs' : '@'} {pick.opponent_name}</Text>
-          </Text>
+          <View style={styles.pickedTeamRow}>
+            {pick.team_logo_url && (
+              <View style={styles.pickedTeamLogoBackdrop}>
+                <Image source={{ uri: pick.team_logo_url }} style={styles.pickedTeamLogo} />
+              </View>
+            )}
+            <Text style={styles.pickedTeam}>
+              {pick.team_name} <Text style={styles.opponentText}>{pick.is_home ? 'vs' : '@'} {pick.opponent_name}</Text>
+            </Text>
+          </View>
         ) : (
           <Text style={styles.pickedHidden}>Picked (hidden until kickoff)</Text>
         )}
@@ -149,6 +161,10 @@ function ResultBadge({ pick, revealed }: { pick: MembershipWeekPick; revealed: b
 }
 
 const styles = StyleSheet.create({
+  brandRow: {
+    alignItems: 'center',
+    marginBottom: 12,
+  },
   container: {
     flex: 1,
     backgroundColor: '#0f172a',
@@ -259,6 +275,24 @@ const styles = StyleSheet.create({
   },
   weekPickText: {
     flex: 1,
+  },
+  pickedTeamRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  pickedTeamLogoBackdrop: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pickedTeamLogo: {
+    width: 16,
+    height: 16,
+    resizeMode: 'contain',
   },
   pickedTeam: {
     color: '#e2e8f0',

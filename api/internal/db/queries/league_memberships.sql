@@ -27,6 +27,16 @@ JOIN users u ON u.id = m.user_id
 WHERE m.league_id = sqlc.arg(league_id) AND m.removed_at IS NULL
 ORDER BY m.created_at ASC;
 
+-- name: ListLeagueMemberEmails :many
+-- Backs the league-deletion email notification (internal/leagues.Service.
+-- DeleteLeague) — needs each member's email/display_name, which
+-- ListActiveMembersWithUser doesn't select since no other caller needs it.
+SELECT m.id AS membership_id, u.id AS user_id, u.email AS email, u.display_name AS display_name
+FROM league_memberships m
+JOIN users u ON u.id = m.user_id
+WHERE m.league_id = sqlc.arg(league_id) AND m.removed_at IS NULL
+ORDER BY m.created_at ASC;
+
 -- name: GetMembershipByIDAndLeague :one
 -- Scoped lookup used by buy-back (Phase 6) to validate that membershipId
 -- belongs to leagueId before any status/bought_back checks run — mirrors

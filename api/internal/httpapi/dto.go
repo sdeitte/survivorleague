@@ -240,12 +240,30 @@ func toLeaderboardEntryResponse(row gen.ListLeaderboardForLeagueRow) leaderboard
 
 type inviteCodeResponse struct {
 	InviteCode string `json:"invite_code"`
+	// Joinable mirrors invitePreviewResponse's field of the same name — see
+	// API.isLeagueJoinable's doc comment. Lets the commissioner's own league
+	// page hide the invite code/invite-by-email UI once new members can no
+	// longer actually join, instead of only failing at send/regenerate time.
+	Joinable bool `json:"joinable"`
+}
+
+// inviteSendResultResponse is one entry of POST /leagues/:id/invite/send's
+// per-recipient response array — see handleSendInvites' doc comment for
+// why this is best-effort-per-recipient rather than all-or-nothing.
+type inviteSendResultResponse struct {
+	Email string `json:"email"`
+	Sent  bool   `json:"sent"`
+	Error string `json:"error,omitempty"`
 }
 
 type invitePreviewResponse struct {
 	LeagueName string `json:"league_name"`
 	Conference string `json:"conference"`
 	SeasonYear int32  `json:"season_year"`
+	// Joinable is false once the league is closed, or once its conference's
+	// week 1 has no pickable games left — see API.isLeagueJoinable's doc
+	// comment. Lets the join UI show why before the user even tries.
+	Joinable bool `json:"joinable"`
 }
 
 // --- Schedule (Phase 3) ---

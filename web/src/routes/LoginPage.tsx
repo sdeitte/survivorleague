@@ -1,14 +1,21 @@
 import { useState } from 'react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import { BrandWordmark } from '../components/BrandWordmark'
 import { loginSchema, type LoginFormValues } from '../auth/schemas'
 import { ApiError } from '../api'
 
+// A `?code=` param means this login was reached via an emailed
+// league-invite join link (see JoinLeaguePage's doc comment) — in that
+// case, success sends them back to the join confirm screen (rather than
+// home) with the code still attached, one click from being in the league.
 export function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const code = searchParams.get('code')
   const [serverError, setServerError] = useState<string | null>(null)
 
   const {
@@ -21,7 +28,7 @@ export function LoginPage() {
     setServerError(null)
     try {
       await login(values.email, values.password)
-      navigate('/', { replace: true })
+      navigate(code ? `/leagues/join?code=${encodeURIComponent(code)}` : '/', { replace: true })
     } catch (err) {
       setServerError(err instanceof ApiError ? err.message : 'Failed to log in. Please try again.')
     }
@@ -30,10 +37,11 @@ export function LoginPage() {
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
       <div className="max-w-sm w-full space-y-4 rounded-xl border border-slate-800 bg-slate-900 p-6 shadow-lg">
-        <div>
-          <h1 className="text-xl font-semibold">Log in</h1>
-          <p className="text-sm text-slate-400">Survivor League</p>
+        <div className="flex justify-center">
+          <BrandWordmark size={140} />
         </div>
+
+        <h1 className="text-xl font-semibold text-center">Log in</h1>
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-3" noValidate>
           <div>
@@ -55,7 +63,7 @@ export function LoginPage() {
               <label htmlFor="password" className="block text-sm text-slate-300">
                 Password
               </label>
-              <Link to="/forgot-password" className="text-xs text-slate-400 underline">
+              <Link to="/forgot-password" className="text-xs text-slate-500 underline">
                 Forgot password?
               </Link>
             </div>
@@ -80,9 +88,9 @@ export function LoginPage() {
           </button>
         </form>
 
-        <p className="text-sm text-slate-400">
+        <p className="text-sm text-slate-500">
           No account?{' '}
-          <Link to="/register" className="text-slate-200 underline">
+          <Link to={code ? `/register?code=${encodeURIComponent(code)}` : '/register'} className="text-slate-200 underline">
             Register
           </Link>
         </p>

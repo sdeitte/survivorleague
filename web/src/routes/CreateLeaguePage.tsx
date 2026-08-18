@@ -3,6 +3,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
+import { BrandWordmark } from '../components/BrandWordmark'
 import { createLeague, listConferences, ApiError } from '../api'
 import { createLeagueSchema, type CreateLeagueFormValues } from '../leagues/schemas'
 
@@ -41,9 +42,13 @@ export function CreateLeaguePage() {
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
       <div className="max-w-sm w-full space-y-4 rounded-xl border border-slate-800 bg-slate-900 p-6 shadow-lg">
+        <div className="flex justify-center text-base">
+          <BrandWordmark size={200} />
+        </div>
+
         <div>
           <h1 className="text-xl font-semibold">Create a league</h1>
-          <p className="text-sm text-slate-400">You'll be its commissioner and a playing contestant.</p>
+          <p className="text-sm text-slate-500">You'll be its commissioner and a playing contestant.</p>
         </div>
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-3" noValidate>
@@ -121,7 +126,7 @@ export function CreateLeaguePage() {
           </button>
         </form>
 
-        <Link to="/" className="block text-sm text-slate-400 underline text-center">
+        <Link to="/" className="block text-sm text-slate-500 underline text-center">
           Cancel
         </Link>
       </div>

@@ -38,6 +38,19 @@ SET invite_code = sqlc.arg(invite_code), updated_at = now()
 WHERE id = sqlc.arg(id)
 RETURNING *;
 
+-- name: CloseLeague :one
+-- Closes a league (Commissioner-only). Deliberately an UPDATE, not a
+-- DELETE — the league row, its memberships, picks, and full history all
+-- stay in place; only status flips. See
+-- internal/leagues.Service.CloseLeague's doc comment for what "closed"
+-- means to the rest of the API. WHERE status != 'closed' guards against a
+-- double-close (concurrent or repeated) returning no rows, which the
+-- service maps to ErrLeagueAlreadyClosed.
+UPDATE leagues
+SET status = 'closed', updated_at = now()
+WHERE id = sqlc.arg(id) AND status != 'closed'
+RETURNING *;
+
 -- name: ListLeaguesAdmin :many
 -- Backs GET /admin/leagues (Phase 8, requireSiteAdmin) — every league in
 -- the system, not scoped to the requester (unlike GET /leagues). Joins the

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { useFonts, Creepster_400Regular } from '@expo-google-fonts/creepster';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import { LoginScreen } from './screens/LoginScreen';
@@ -141,6 +142,21 @@ function Root() {
 }
 
 export default function App() {
+  // Creepster backs the "Survivor"-style scary-letters brand wordmark (see
+  // styles.titleScary in screens that use it) — gated behind useFonts since
+  // React Native has no CSS @font-face fallback-while-loading like the web
+  // app gets for free; fontError still lets the app proceed (falls back to
+  // the system font rather than blocking the whole app on a font CDN blip).
+  const [fontsLoaded, fontError] = useFonts({ Creepster_400Regular });
+
+  if (!fontsLoaded && !fontError) {
+    return (
+      <View style={styles.loading}>
+        <ActivityIndicator color="#f1f5f9" />
+      </View>
+    );
+  }
+
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>

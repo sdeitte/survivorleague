@@ -3,6 +3,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
 import { Link, useSearchParams } from 'react-router-dom'
 import { resetPasswordSchema, type ResetPasswordFormValues } from '../auth/schemas'
+import { BrandWordmark } from '../components/BrandWordmark'
 import { resetPassword, ApiError } from '../api'
 
 // Reads the reset token from the URL query param (the placeholder frontend
@@ -38,10 +39,11 @@ export function ResetPasswordPage() {
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
       <div className="max-w-sm w-full space-y-4 rounded-xl border border-slate-800 bg-slate-900 p-6 shadow-lg">
-        <div>
-          <h1 className="text-xl font-semibold">Reset password</h1>
-          <p className="text-sm text-slate-400">Survivor League</p>
+        <div className="flex justify-center">
+          <BrandWordmark size={140} />
         </div>
+
+        <h1 className="text-xl font-semibold text-center">Reset password</h1>
 
         {!token ? (
           <p className="text-sm text-red-400">
@@ -92,7 +94,7 @@ export function ResetPasswordPage() {
           </form>
         )}
 
-        <p className="text-sm text-slate-400">
+        <p className="text-sm text-slate-500">
           <Link to="/login" className="text-slate-200 underline">
             Back to log in
           </Link>

@@ -49,14 +49,13 @@ function App() {
             </ProtectedRoute>
           }
         />
-        <Route
-          path="/leagues/join"
-          element={
-            <ProtectedRoute>
-              <JoinLeaguePage />
-            </ProtectedRoute>
-          }
-        />
+        {/* Public (not ProtectedRoute-wrapped): the join link in
+            notify.Service.SendLeagueInviteEmail points here, and the
+            recipient may not have an account yet. JoinLeaguePage previews
+            the league via the public GET /invites/{code} regardless of
+            auth state, and only requires being logged in for the actual
+            join step — see its own doc comment. */}
+        <Route path="/leagues/join" element={<JoinLeaguePage />} />
         <Route
           path="/leagues/:id"
           element={

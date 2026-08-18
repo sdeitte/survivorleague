@@ -34,6 +34,26 @@ DELETE FROM weeks w
 WHERE w.id = sqlc.arg(id)
   AND NOT EXISTS (SELECT 1 FROM games g WHERE g.week_id = w.id);
 
+-- name: ListWeekKickoffRangesForConference :many
+-- Every week of the season that has at least one game involving a team
+-- in conference, with that week's earliest and latest kickoff among
+-- those games. Backs the "current week" calculation (the week whose
+-- kickoff window brackets now, or — in the gap between one week ending
+-- and the next starting — the nearest upcoming week): the service layer
+-- picks the right row from this list, this query just supplies the
+-- per-week ranges in week order.
+SELECT
+    w.id AS week_id,
+    w.week_number,
+    min(g.kickoff_at)::timestamptz AS min_kickoff,
+    max(g.kickoff_at)::timestamptz AS max_kickoff
+FROM weeks w
+JOIN games g ON g.week_id = w.id
+JOIN teams t ON (t.id = g.home_team_id OR t.id = g.away_team_id) AND t.conference = sqlc.arg(conference)
+WHERE w.season_year = sqlc.arg(season_year)
+GROUP BY w.id, w.week_number
+ORDER BY w.week_number ASC;
+
 -- name: ListLiveWindowWeeks :many
 -- Distinct (season_year, week_number) among games currently inside the
 -- live poll window: kicked off but not yet final, and not so long ago

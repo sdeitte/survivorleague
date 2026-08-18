@@ -55,16 +55,22 @@ WHERE g.id = sqlc.arg(id);
 -- Local-dev-only: fabricates a completed result for an already-synced
 -- game (used by cmd/seed-demo, never by the running server). Sets
 -- kickoff_at into the past, status='final', a made-up score, and
--- winner_team_id derived from home_wins — but deliberately leaves
--- graded_at untouched (NULL) so the real grading.Service.GradeGame path
--- (its normal idempotency guard) is what actually grades it, keeping the
--- fabricated data exactly as internally consistent as a real result.
+-- winner_team_id derived from home_wins. Explicitly resets graded_at to
+-- NULL so the real grading.Service.GradeGame path (its normal idempotency
+-- guard) is what actually grades it, keeping the fabricated data exactly
+-- as internally consistent as a real result — this must be an explicit
+-- reset, not just "leave it NULL", because a game reused across multiple
+-- seed-demo runs (e.g. after cmd/reset-schedule, which deliberately
+-- preserves graded_at when it restores everything else from CFBD) would
+-- otherwise still be stamped from the previous run, silently short-circuiting
+-- GradeGame's guard and leaving every pick on it stuck at 'pending' forever.
 UPDATE games SET
     kickoff_at = sqlc.arg(kickoff_at),
     status = 'final',
     home_score = sqlc.arg(home_score),
     away_score = sqlc.arg(away_score),
     winner_team_id = (CASE WHEN sqlc.arg(home_wins)::boolean THEN home_team_id ELSE away_team_id END),
+    graded_at = NULL,
     updated_at = now()
 WHERE id = sqlc.arg(id)
 RETURNING *;

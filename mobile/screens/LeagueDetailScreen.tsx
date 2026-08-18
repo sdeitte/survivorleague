@@ -1,7 +1,22 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ActivityIndicator, Alert, FlatList, Pressable, Share, StyleSheet, Switch, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Image,
+  Modal,
+  Pressable,
+  Share,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { useAuth } from '../auth/AuthContext';
+import { BrandWordmark } from '../components/BrandWordmark';
+import { getConferenceLogoUrl } from '../leagues/conferenceLogos';
 import * as api from '../api';
 import { ApiError, type Member } from '../api';
 
@@ -19,6 +34,10 @@ export function LeagueDetailScreen({
   const { authFetch } = useAuth();
   const queryClient = useQueryClient();
   const [actionError, setActionError] = useState<string | null>(null);
+  const [closeModalVisible, setCloseModalVisible] = useState(false);
+  const [closeConfirmText, setCloseConfirmText] = useState('');
+  const [inviteRows, setInviteRows] = useState<{ name: string; email: string }[]>([{ name: '', email: '' }]);
+  const [inviteResults, setInviteResults] = useState<api.InviteSendResult[] | null>(null);
 
   const leagueQuery = useQuery({
     queryKey: ['league', leagueId],
@@ -63,6 +82,34 @@ export function LeagueDetailScreen({
       void queryClient.invalidateQueries({ queryKey: ['league', leagueId, 'leaderboard'] });
     },
     onError: (err) => setActionError(err instanceof ApiError ? err.message : 'Failed to buy back member.'),
+  });
+
+  const closeMutation = useMutation({
+    mutationFn: () => authFetch((token) => api.closeLeague(token, leagueId, closeConfirmText)),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(['league', leagueId], updated);
+      setCloseModalVisible(false);
+      setCloseConfirmText('');
+    },
+    onError: (err) => setActionError(err instanceof ApiError ? err.message : 'Failed to close league.'),
+  });
+
+  const updateInviteRow = (index: number, field: 'name' | 'email', value: string) => {
+    setInviteRows((rows) => rows.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
+  };
+  const addInviteRow = () => setInviteRows((rows) => [...rows, { name: '', email: '' }]);
+  const removeInviteRow = (index: number) => setInviteRows((rows) => rows.filter((_, i) => i !== index));
+
+  const sendInvitesMutation = useMutation({
+    mutationFn: () =>
+      authFetch((token) => api.sendInvites(token, leagueId, inviteRows.filter((row) => row.email.trim() !== ''))),
+    onSuccess: (results) => {
+      setInviteResults(results);
+      if (results.every((r) => r.sent)) {
+        setInviteRows([{ name: '', email: '' }]);
+      }
+    },
+    onError: (err) => setActionError(err instanceof ApiError ? err.message : 'Failed to send invites.'),
   });
 
   const confirmRemove = (member: Member) => {
@@ -128,9 +175,20 @@ export function LeagueDetailScreen({
   }
 
   const league = leagueQuery.data;
+  const isClosed = league.status === 'closed';
+  const closePhrase = `I want to close ${league.name}`;
+  // Mirrors the backend's isLeagueJoinable — already covers "closed", so
+  // this alone gates the invite code / invite-by-email UI. Defaults to
+  // true while the invite query is still loading so these cards don't
+  // flash hidden then shown on first render.
+  const inviteJoinable = inviteQuery.data?.joinable ?? true;
 
   return (
     <View style={styles.container}>
+      <View style={styles.brandRow}>
+        <BrandWordmark size={90} />
+      </View>
+
       <Pressable onPress={onBack}>
         <Text style={styles.backLink}>← My Leagues</Text>
       </Pressable>
@@ -140,10 +198,26 @@ export function LeagueDetailScreen({
         keyExtractor={(item) => item.membership_id}
         ListHeaderComponent={
           <>
+            {isClosed && (
+              <View style={styles.closedBanner}>
+                <Text style={styles.closedBannerTitle}>This league is closed</Text>
+                <Text style={styles.closedBannerSubtitle}>
+                  No new picks, joins, or changes can be made. The league and its history are still here to look
+                  back on.
+                </Text>
+              </View>
+            )}
+
             <View style={styles.actionsRow}>
-              <Pressable style={[styles.pickButton, styles.actionButton]} onPress={() => onNavigateToPicks(leagueId)}>
-                <Text style={styles.pickButtonText}>Make your pick</Text>
-              </Pressable>
+              {isClosed ? (
+                <View style={[styles.pickButtonDisabled, styles.actionButton]}>
+                  <Text style={styles.pickButtonDisabledText}>Make your pick</Text>
+                </View>
+              ) : (
+                <Pressable style={[styles.pickButton, styles.actionButton]} onPress={() => onNavigateToPicks(leagueId)}>
+                  <Text style={styles.pickButtonText}>Make your pick</Text>
+                </Pressable>
+              )}
               <Pressable style={[styles.buttonOutline, styles.actionButton]} onPress={() => onNavigateToLeaderboard(leagueId)}>
                 <Text style={styles.buttonOutlineText}>Leaderboard</Text>
               </Pressable>
@@ -152,34 +226,46 @@ export function LeagueDetailScreen({
             <View style={styles.card}>
               <View style={styles.rowBetween}>
                 <Text style={styles.leagueName}>{league.name}</Text>
-                <View style={[styles.badge, league.membership.role === 'commissioner' && styles.badgeCommissioner]}>
-                  <Text
-                    style={[
-                      styles.badgeText,
-                      league.membership.role === 'commissioner' && styles.badgeTextCommissioner,
-                    ]}
-                  >
-                    {league.membership.role}
-                  </Text>
+                <View style={styles.badgeRow}>
+                  {isClosed && (
+                    <View style={styles.badgeClosed}>
+                      <Text style={styles.badgeTextClosed}>closed</Text>
+                    </View>
+                  )}
+                  <View style={[styles.badge, league.membership.role === 'commissioner' && styles.badgeCommissioner]}>
+                    <Text
+                      style={[
+                        styles.badgeText,
+                        league.membership.role === 'commissioner' && styles.badgeTextCommissioner,
+                      ]}
+                    >
+                      {league.membership.role}
+                    </Text>
+                  </View>
                 </View>
               </View>
-              <Text style={styles.leagueMeta}>
-                {league.conference} · {league.season_year}
-              </Text>
+              <View style={styles.leagueMetaRow}>
+                {getConferenceLogoUrl(league.conference) && (
+                  <Image source={{ uri: getConferenceLogoUrl(league.conference) }} style={styles.conferenceLogoSmall} />
+                )}
+                <Text style={styles.leagueMeta}>
+                  {league.conference} · {league.season_year}
+                </Text>
+              </View>
 
               {isCommissioner && (
                 <View style={styles.switchRow}>
                   <Text style={styles.switchLabel}>Playing as a contestant</Text>
                   <Switch
                     value={league.membership.is_contestant}
-                    disabled={toggleContestantMutation.isPending}
+                    disabled={toggleContestantMutation.isPending || isClosed}
                     onValueChange={(v) => toggleContestantMutation.mutate(v)}
                   />
                 </View>
               )}
             </View>
 
-            {isCommissioner && (
+            {isCommissioner && inviteJoinable && (
               <View style={styles.card}>
                 <Text style={styles.sectionTitle}>Invite code</Text>
                 {inviteQuery.isLoading && <ActivityIndicator color="#f1f5f9" />}
@@ -196,6 +282,68 @@ export function LeagueDetailScreen({
                     {regenerateMutation.isPending ? 'Regenerating…' : 'Regenerate code (invalidates the old one)'}
                   </Text>
                 </Pressable>
+              </View>
+            )}
+
+            {isCommissioner && inviteJoinable && (
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>Invite by email</Text>
+                <Text style={styles.inviteHint}>Add names and emails, then send everyone your invite link at once.</Text>
+                {inviteRows.map((row, i) => (
+                  <View key={i} style={styles.inviteRowInput}>
+                    <TextInput
+                      value={row.name}
+                      onChangeText={(v) => updateInviteRow(i, 'name', v)}
+                      placeholder="Name (optional)"
+                      placeholderTextColor="#475569"
+                      style={[styles.inviteInput, styles.inviteNameInput]}
+                    />
+                    <TextInput
+                      value={row.email}
+                      onChangeText={(v) => updateInviteRow(i, 'email', v)}
+                      placeholder="email@example.com"
+                      placeholderTextColor="#475569"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      keyboardType="email-address"
+                      style={[styles.inviteInput, styles.inviteEmailInput]}
+                    />
+                    <Pressable
+                      onPress={() => removeInviteRow(i)}
+                      disabled={inviteRows.length === 1}
+                      style={styles.inviteRemoveButton}
+                    >
+                      <Text style={[styles.inviteRemoveText, inviteRows.length === 1 && styles.buttonDisabled]}>✕</Text>
+                    </Pressable>
+                  </View>
+                ))}
+                <View style={styles.rowBetween}>
+                  <Pressable onPress={addInviteRow}>
+                    <Text style={styles.link}>+ Add another</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[
+                      styles.pickButton,
+                      (sendInvitesMutation.isPending || inviteRows.every((row) => row.email.trim() === '')) &&
+                        styles.buttonDisabled,
+                    ]}
+                    disabled={sendInvitesMutation.isPending || inviteRows.every((row) => row.email.trim() === '')}
+                    onPress={() => sendInvitesMutation.mutate()}
+                  >
+                    <Text style={styles.pickButtonText}>
+                      {sendInvitesMutation.isPending ? 'Sending…' : 'Send invites'}
+                    </Text>
+                  </Pressable>
+                </View>
+                {inviteResults && (
+                  <View style={styles.inviteResults}>
+                    {inviteResults.map((r, i) => (
+                      <Text key={r.email + i} style={r.sent ? styles.inviteResultSent : styles.inviteResultFailed}>
+                        {r.email} — {r.sent ? 'sent' : r.error}
+                      </Text>
+                    ))}
+                  </View>
+                )}
               </View>
             )}
 
@@ -221,7 +369,7 @@ export function LeagueDetailScreen({
               </Text>
             </View>
             <View style={styles.memberActions}>
-              {isCommissioner && item.status === 'eliminated' && (
+              {isCommissioner && !isClosed && item.status === 'eliminated' && (
                 item.bought_back ? (
                   <Text style={styles.buyBackUsedText}>Buy-back already used</Text>
                 ) : (
@@ -230,7 +378,7 @@ export function LeagueDetailScreen({
                   </Pressable>
                 )
               )}
-              {isCommissioner && item.role !== 'commissioner' && (
+              {isCommissioner && !isClosed && item.role !== 'commissioner' && (
                 <Pressable onPress={() => confirmRemove(item)}>
                   <Text style={styles.removeLink}>Remove</Text>
                 </Pressable>
@@ -238,12 +386,84 @@ export function LeagueDetailScreen({
             </View>
           </View>
         )}
+        ListFooterComponent={
+          isCommissioner && !isClosed ? (
+            <View style={styles.dangerZone}>
+              <Text style={styles.dangerZoneTitle}>Danger zone</Text>
+              <Text style={styles.dangerZoneSubtitle}>
+                Closing this league locks it for everyone — no more picks, joins, or changes. This can't be undone
+                by you, though nothing is deleted.
+              </Text>
+              <Pressable style={styles.dangerZoneButton} onPress={() => setCloseModalVisible(true)}>
+                <Text style={styles.dangerZoneButtonText}>Close league</Text>
+              </Pressable>
+            </View>
+          ) : null
+        }
       />
+
+      <Modal
+        visible={closeModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCloseModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Close {league.name}?</Text>
+            <Text style={styles.modalDescription}>
+              Every member will be locked out — no more picks, joins, or league changes. The league and its full
+              history stay saved, but this can't be undone by you. To confirm, type "{closePhrase}" below.
+            </Text>
+            <TextInput
+              value={closeConfirmText}
+              onChangeText={setCloseConfirmText}
+              placeholder={closePhrase}
+              placeholderTextColor="#475569"
+              autoCorrect={false}
+              autoCapitalize="none"
+              contextMenuHidden
+              style={styles.modalInput}
+            />
+            {closeMutation.error && (
+              <Text style={styles.error}>
+                {closeMutation.error instanceof ApiError ? closeMutation.error.message : 'Failed to close league.'}
+              </Text>
+            )}
+            <View style={styles.modalButtonRow}>
+              <Pressable
+                style={styles.modalCancelButton}
+                onPress={() => {
+                  setCloseModalVisible(false);
+                  setCloseConfirmText('');
+                }}
+              >
+                <Text style={styles.modalCancelButtonText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.modalConfirmButton,
+                  (closeConfirmText !== closePhrase || closeMutation.isPending) && styles.buttonDisabled,
+                ]}
+                disabled={closeConfirmText !== closePhrase || closeMutation.isPending}
+                onPress={() => closeMutation.mutate()}
+              >
+                <Text style={styles.modalConfirmButtonText}>
+                  {closeMutation.isPending ? 'Closing…' : 'Close league'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  brandRow: {
+    alignItems: 'center',
+  },
   container: {
     flex: 1,
     backgroundColor: '#0f172a',
@@ -301,6 +521,16 @@ const styles = StyleSheet.create({
     color: '#f1f5f9',
     fontSize: 18,
     fontWeight: '600',
+  },
+  leagueMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  conferenceLogoSmall: {
+    width: 32,
+    height: 32,
+    resizeMode: 'contain',
   },
   leagueMeta: {
     color: '#94a3b8',
@@ -411,5 +641,202 @@ const styles = StyleSheet.create({
     color: '#94a3b8',
     fontSize: 13,
     textDecorationLine: 'underline',
+  },
+  closedBanner: {
+    borderWidth: 1,
+    borderColor: '#92400e',
+    backgroundColor: '#451a03',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
+    gap: 4,
+  },
+  closedBannerTitle: {
+    color: '#fcd34d',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  closedBannerSubtitle: {
+    color: '#fbbf24',
+    fontSize: 12,
+  },
+  pickButtonDisabled: {
+    backgroundColor: '#1e293b',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  pickButtonDisabledText: {
+    color: '#64748b',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  badgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  badgeClosed: {
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: '#b45309',
+  },
+  badgeTextClosed: {
+    color: '#fbbf24',
+    fontSize: 11,
+  },
+  dangerZone: {
+    borderWidth: 1,
+    borderColor: '#7f1d1d',
+    backgroundColor: 'rgba(69, 10, 10, 0.3)',
+    borderRadius: 12,
+    padding: 16,
+    gap: 6,
+    marginTop: 4,
+  },
+  dangerZoneTitle: {
+    color: '#fca5a5',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  dangerZoneSubtitle: {
+    color: '#f87171',
+    fontSize: 12,
+  },
+  dangerZoneButton: {
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: '#991b1b',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    marginTop: 4,
+  },
+  dangerZoneButtonText: {
+    color: '#fca5a5',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 400,
+    backgroundColor: '#1e293b',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#7f1d1d',
+    padding: 20,
+    gap: 12,
+  },
+  modalTitle: {
+    color: '#f1f5f9',
+    fontSize: 17,
+    fontWeight: '600',
+  },
+  modalDescription: {
+    color: '#94a3b8',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: '#334155',
+    backgroundColor: '#0f172a',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    color: '#f1f5f9',
+    fontSize: 14,
+  },
+  modalButtonRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  modalCancelButton: {
+    flex: 1,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#334155',
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  modalCancelButtonText: {
+    color: '#f1f5f9',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  modalConfirmButton: {
+    flex: 1,
+    borderRadius: 8,
+    backgroundColor: '#dc2626',
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  modalConfirmButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  buttonDisabled: {
+    opacity: 0.4,
+  },
+  inviteHint: {
+    color: '#64748b',
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  inviteRowInput: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
+  },
+  inviteInput: {
+    borderWidth: 1,
+    borderColor: '#334155',
+    backgroundColor: '#0f172a',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    color: '#f1f5f9',
+    fontSize: 13,
+  },
+  inviteNameInput: {
+    flex: 2,
+  },
+  inviteEmailInput: {
+    flex: 3,
+  },
+  inviteRemoveButton: {
+    paddingHorizontal: 6,
+    paddingVertical: 6,
+  },
+  inviteRemoveText: {
+    color: '#f87171',
+    fontSize: 14,
+  },
+  inviteResults: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#334155',
+    gap: 2,
+  },
+  inviteResultSent: {
+    color: '#34d399',
+    fontSize: 12,
+  },
+  inviteResultFailed: {
+    color: '#f87171',
+    fontSize: 12,
   },
 });

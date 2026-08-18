@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useAuth } from '../auth/AuthContext';
+import { BrandWordmark } from '../components/BrandWordmark';
+import { getConferenceLogoUrl } from '../leagues/conferenceLogos';
 import * as api from '../api';
 import type { League } from '../api';
 import { ApiError } from '../api';
@@ -80,11 +82,11 @@ export function MyLeaguesScreen({
 
   return (
     <View style={styles.container}>
+      <View style={styles.brandRow}>
+        <BrandWordmark size={138} />
+      </View>
       <View style={styles.header}>
-        <View>
-          <Text style={styles.title}>Survivor League</Text>
-          <Text style={styles.subtitle}>Signed in as {user?.display_name}</Text>
-        </View>
+        <Text style={styles.subtitle}>Signed in as {user?.display_name}</Text>
         <Pressable onPress={() => void logout()}>
           <Text style={styles.link}>Log out</Text>
         </Pressable>
@@ -115,22 +117,37 @@ export function MyLeaguesScreen({
           ) : null
         }
         renderItem={({ item }) => (
-          <Pressable style={styles.leagueRow} onPress={() => onNavigateToLeague(item.id)}>
-            <View>
-              <Text style={styles.leagueName}>{item.name}</Text>
-              <Text style={styles.leagueMeta}>
-                {item.conference} · {item.season_year}
-              </Text>
+          <Pressable
+            style={[styles.leagueRow, item.status === 'closed' && styles.leagueRowClosed]}
+            onPress={() => onNavigateToLeague(item.id)}
+          >
+            <View style={styles.leagueRowLeft}>
+              {getConferenceLogoUrl(item.conference) && (
+                <Image source={{ uri: getConferenceLogoUrl(item.conference) }} style={styles.conferenceLogo} />
+              )}
+              <View style={styles.leagueRowTextCol}>
+                <Text style={styles.leagueName}>{item.name}</Text>
+                <Text style={styles.leagueMeta}>
+                  {item.conference} · {item.season_year}
+                </Text>
+              </View>
             </View>
-            <View style={[styles.badge, item.membership.role === 'commissioner' && styles.badgeCommissioner]}>
-              <Text
-                style={[
-                  styles.badgeText,
-                  item.membership.role === 'commissioner' && styles.badgeTextCommissioner,
-                ]}
-              >
-                {item.membership.role}
-              </Text>
+            <View style={styles.badgeRow}>
+              {item.status === 'closed' && (
+                <View style={styles.badgeClosed}>
+                  <Text style={styles.badgeTextClosed}>closed</Text>
+                </View>
+              )}
+              <View style={[styles.badge, item.membership.role === 'commissioner' && styles.badgeCommissioner]}>
+                <Text
+                  style={[
+                    styles.badgeText,
+                    item.membership.role === 'commissioner' && styles.badgeTextCommissioner,
+                  ]}
+                >
+                  {item.membership.role}
+                </Text>
+              </View>
             </View>
           </Pressable>
         )}
@@ -158,15 +175,13 @@ const styles = StyleSheet.create({
     padding: 24,
     gap: 16,
   },
+  brandRow: {
+    alignItems: 'center',
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  title: {
-    color: '#f1f5f9',
-    fontSize: 22,
-    fontWeight: '600',
+    alignItems: 'center',
   },
   subtitle: {
     color: '#94a3b8',
@@ -215,13 +230,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   button: {
-    backgroundColor: '#f1f5f9',
+    backgroundColor: '#059669',
     borderRadius: 8,
     paddingVertical: 12,
     alignItems: 'center',
   },
   buttonText: {
-    color: '#0f172a',
+    color: '#ffffff',
     fontWeight: '600',
   },
   buttonOutline: {
@@ -253,6 +268,39 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 14,
     marginBottom: 8,
+  },
+  leagueRowLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flexShrink: 1,
+  },
+  leagueRowTextCol: {
+    flexShrink: 1,
+  },
+  conferenceLogo: {
+    width: 50,
+    height: 50,
+    resizeMode: 'contain',
+  },
+  leagueRowClosed: {
+    opacity: 0.6,
+  },
+  badgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  badgeClosed: {
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: '#b45309',
+  },
+  badgeTextClosed: {
+    color: '#fbbf24',
+    fontSize: 11,
   },
   leagueName: {
     color: '#f1f5f9',

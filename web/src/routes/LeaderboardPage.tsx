@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
+import { BrandWordmark } from '../components/BrandWordmark'
 import { getLeaderboard, getLeague, listMembershipPicks, ApiError, type LeaderboardEntry, type MembershipWeekPick } from '../api'
 
 // The leaderboard screen — a sorted list with status badges, each row
@@ -30,13 +31,17 @@ export function LeaderboardPage() {
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 p-6">
       <div className="max-w-lg mx-auto space-y-4">
+        <div className="flex justify-center text-lg">
+          <BrandWordmark size={200} />
+        </div>
+
         <Link to={`/leagues/${id}`} className="text-xs text-slate-500 underline">
           ← {leagueQuery.data?.name ?? 'League'}
         </Link>
 
         <h1 className="text-xl font-semibold">Leaderboard</h1>
 
-        {leaderboardQuery.isLoading && <p className="text-sm text-slate-400">Loading standings…</p>}
+        {leaderboardQuery.isLoading && <p className="text-sm text-slate-500">Loading standings…</p>}
         {leaderboardQuery.error && (
           <p className="text-red-400 text-sm">
             {leaderboardQuery.error instanceof ApiError ? leaderboardQuery.error.message : 'Could not load the leaderboard.'}
@@ -57,7 +62,7 @@ export function LeaderboardPage() {
             />
           ))}
           {leaderboardQuery.data?.length === 0 && (
-            <p className="p-4 text-sm text-slate-400">No members yet.</p>
+            <p className="p-4 text-sm text-slate-500">No members yet.</p>
           )}
         </div>
       </div>
@@ -114,7 +119,7 @@ function LeaderboardRow({
 
       {expanded && (
         <div className="px-4 pb-4">
-          {picksQuery.isLoading && <p className="text-xs text-slate-400">Loading picks…</p>}
+          {picksQuery.isLoading && <p className="text-xs text-slate-500">Loading picks…</p>}
           {picksQuery.error && (
             <p className="text-xs text-red-400">
               {picksQuery.error instanceof ApiError ? picksQuery.error.message : 'Could not load this member’s picks.'}
@@ -146,7 +151,12 @@ function WeekPickRow({ pick }: { pick: MembershipWeekPick }) {
         {!pick.has_picked ? (
           <span className="text-xs text-slate-600">Not picked</span>
         ) : revealed ? (
-          <span className="text-xs text-slate-200">
+          <span className="text-xs text-slate-200 inline-flex items-center gap-1.5">
+            {pick.team_logo_url && (
+              <span className="h-4 w-4 rounded-full bg-white p-0.5 shrink-0">
+                <img src={pick.team_logo_url} alt="" className="h-full w-full object-contain" loading="lazy" />
+              </span>
+            )}
             {pick.team_name} <span className="text-slate-500">{pick.is_home ? 'vs' : '@'} {pick.opponent_name}</span>
           </span>
         ) : (

@@ -34,6 +34,14 @@ type Querier interface {
 	// leaving rows stranded in some intermediate "claimed but never finished"
 	// state.
 	ClaimPendingNotifications(ctx context.Context, limitCount int32) ([]NotificationOutbox, error)
+	// Closes a league (Commissioner-only). Deliberately an UPDATE, not a
+	// DELETE — the league row, its memberships, picks, and full history all
+	// stay in place; only status flips. See
+	// internal/leagues.Service.CloseLeague's doc comment for what "closed"
+	// means to the rest of the API. WHERE status != 'closed' guards against a
+	// double-close (concurrent or repeated) returning no rows, which the
+	// service maps to ErrLeagueAlreadyClosed.
+	CloseLeague(ctx context.Context, id pgtype.UUID) (League, error)
 	CountAuditLog(ctx context.Context, arg CountAuditLogParams) (int64, error)
 	CountLeaguesAdmin(ctx context.Context) (int64, error)
 	// Test/verification helper — lets integration tests assert "N rows
@@ -262,6 +270,10 @@ type Querier interface {
 	// phase's scope (would need a periodic sweep, not just a
 	// game-finalization trigger).
 	ListLeagueIDsWithPicksForWeek(ctx context.Context, weekID pgtype.UUID) ([]pgtype.UUID, error)
+	// Backs the league-deletion email notification (internal/leagues.Service.
+	// DeleteLeague) — needs each member's email/display_name, which
+	// ListActiveMembersWithUser doesn't select since no other caller needs it.
+	ListLeagueMemberEmails(ctx context.Context, leagueID pgtype.UUID) ([]ListLeagueMemberEmailsRow, error)
 	// Backs GET /admin/leagues (Phase 8, requireSiteAdmin) — every league in
 	// the system, not scoped to the requester (unlike GET /leagues). Joins the
 	// commissioner's user row for display_name/email, and computes
@@ -311,6 +323,14 @@ type Querier interface {
 	// rows this user has, computed inline rather than via a join+GROUP BY so a
 	// user in zero leagues still gets one output row.
 	ListUsersAdmin(ctx context.Context, arg ListUsersAdminParams) ([]ListUsersAdminRow, error)
+	// Every week of the season that has at least one game involving a team
+	// in conference, with that week's earliest and latest kickoff among
+	// those games. Backs the "current week" calculation (the week whose
+	// kickoff window brackets now, or — in the gap between one week ending
+	// and the next starting — the nearest upcoming week): the service layer
+	// picks the right row from this list, this query just supplies the
+	// per-week ranges in week order.
+	ListWeekKickoffRangesForConference(ctx context.Context, arg ListWeekKickoffRangesForConferenceParams) ([]ListWeekKickoffRangesForConferenceRow, error)
 	ListWeeksBySeasonYear(ctx context.Context, seasonYear int32) ([]Week, error)
 	// Conditioned on used_at IS NULL so a concurrent replay of the same token
 	// loses the race cleanly (RETURNING zero rows -> pgx.ErrNoRows), same
@@ -353,10 +373,15 @@ type Querier interface {
 	// Local-dev-only: fabricates a completed result for an already-synced
 	// game (used by cmd/seed-demo, never by the running server). Sets
 	// kickoff_at into the past, status='final', a made-up score, and
-	// winner_team_id derived from home_wins — but deliberately leaves
-	// graded_at untouched (NULL) so the real grading.Service.GradeGame path
-	// (its normal idempotency guard) is what actually grades it, keeping the
-	// fabricated data exactly as internally consistent as a real result.
+	// winner_team_id derived from home_wins. Explicitly resets graded_at to
+	// NULL so the real grading.Service.GradeGame path (its normal idempotency
+	// guard) is what actually grades it, keeping the fabricated data exactly
+	// as internally consistent as a real result — this must be an explicit
+	// reset, not just "leave it NULL", because a game reused across multiple
+	// seed-demo runs (e.g. after cmd/reset-schedule, which deliberately
+	// preserves graded_at when it restores everything else from CFBD) would
+	// otherwise still be stamped from the previous run, silently short-circuiting
+	// GradeGame's guard and leaving every pick on it stuck at 'pending' forever.
 	SeedFinalizeGame(ctx context.Context, arg SeedFinalizeGameParams) (Game, error)
 	UpdateCommissionerIsContestant(ctx context.Context, arg UpdateCommissionerIsContestantParams) (LeagueMembership, error)
 	UpdateLeagueInviteCode(ctx context.Context, arg UpdateLeagueInviteCodeParams) (League, error)

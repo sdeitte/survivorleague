@@ -1,11 +1,11 @@
-// Command seed-demo populates realistic-looking fake players, picks, and
-// results into an existing local league — a local-dev convenience for
-// trying out the leaderboard/picks UI with a populated season instead of
-// an empty one. It is NOT a production tool: it directly fabricates game
-// results (sets status='final' with made-up scores) rather than waiting
-// for real CFBD data, and the next real schedule sync will overwrite that
-// fake data with the real (not-yet-played) game state. Run manually,
-// never wired into cmd/server or any CI job.
+// Command seed-demo populates a realistic multi-week simulated season into
+// an existing local league — a local-dev convenience for trying out the
+// leaderboard/picks UI with a populated season instead of an empty one.
+// It is NOT a production tool: it directly fabricates game results (sets
+// status='final' with made-up scores) rather than waiting for real CFBD
+// data, and the next real schedule sync will overwrite that fake data
+// with the real (not-yet-played) game state. Run manually, never wired
+// into cmd/server or any CI job.
 //
 // It reuses the app's real internal/auth, internal/leagues, internal/picks,
 // and internal/grading services for every state change (registering
@@ -16,25 +16,30 @@
 // detection) because it goes through the identical code paths a real
 // server would use.
 //
-// Every team/game is resolved by NAME at runtime (via the same
-// ListAvailableTeamsForWeek query the picks screen itself uses), not
-// hardcoded UUIDs — hand-transcribing team/game ids for a whole season is
-// exactly the kind of thing that's easy to get subtly wrong (e.g.
-// confusing two different games' ids), and a resolver that fails loudly
-// on a name typo beats a silent wrong-team bug.
+// Design: a week-by-week loop, not a hand-authored script of specific
+// matchups. Each week, every still-active player picks a real, unused
+// (for them) Big Ten team; each game's outcome is decided by a single
+// seeded random draw (reproducible across runs); a player whose pick
+// loses stops appearing in every subsequent week — a real, natural gap in
+// their pick history, exactly how a real eliminated contestant looks,
+// not a special-cased flag. A handful of players are designated
+// "survivors" whose pick always wins, guaranteeing at least some of the
+// field goes all the way through the simulated weeks — real survivor
+// pools always have a few contestants who make it deep, and pure
+// independent-random attrition across many weeks would eliminate
+// everyone by week 6-8 (0.6^8 ≈ 2%), which doesn't tell that story.
 //
-// Important: TryFinalizeLeagueWeek only finalizes a league-week once
-// EVERY conference-relevant game that week is final (see
-// internal/grading's doc comment) — not just the games players happened
-// to pick. So every week here fabricates a result for the league's
-// ENTIRE conference slate that week, defaulting to a home win for any
-// game no player's story cares about.
+// Any game a REAL (non-demo) user already has a live pick on is detected
+// and protected: forced to a result that keeps that real pick a win, so
+// this tool can never accidentally eliminate an actual account as a side
+// effect of generating demo data.
 package main
 
 import (
 	"context"
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"time"
 
@@ -52,34 +57,35 @@ import (
 // The target league: "Steven's LOCAL B1G League" (Big Ten, season 2026).
 const targetLeagueID = "e3946a77-55e1-47a2-b010-7790e60df212"
 
+// simulatedWeeks is how many weeks of the season to generate picks/results
+// for. Leaves the remaining weeks of the real 14-week season untouched and
+// open for genuine manual testing.
+const simulatedWeeks = 8
+
+// winProbability is each at-risk player's chance of surviving a given
+// week's pick, per game (games are decided once, not per-player — see
+// simulateWeek). Low enough that the at-risk field visibly thins out
+// within a few weeks, matching a real survivor pool's early attrition.
+const winProbability = 0.6
+
+// survivorCount is how many of the roster are guaranteed to win every
+// week they play, ensuring the story always has players who go all the
+// way through simulatedWeeks.
+const survivorCount = 3
+
+// randSeed is fixed (not time-seeded) so re-running this tool after a
+// reset-schedule produces the identical story every time — useful for a
+// repeatable "wipe and reseed" local workflow.
+const randSeed = 20260817
+
 type player struct {
 	email       string
 	displayName string
 	userID      pgtype.UUID
 	membership  gen.LeagueMembership
+	usedTeams   map[pgtype.UUID]bool
+	isSurvivor  bool
 	eliminated  bool
-}
-
-// weekPick declares one player's intended pick for a week, by team name —
-// resolved against that week's real schedule at runtime. wins is whether
-// the PICKED team should win (the home/away bookkeeping needed to
-// fabricate a matching game result is computed automatically, not
-// hand-specified).
-type weekPick struct {
-	player   *player
-	teamName string
-	wins     bool
-}
-
-// namedResult forces a specific team to win, independent of any player's
-// pick — used for the one game (Wisconsin/Notre Dame, week 1) where a
-// real user already has a live pick, so their result must come out
-// consistent with the story regardless of whether any demo player is
-// involved. Every OTHER conference game that week not covered by a pick
-// or a namedResult defaults to a home win.
-type namedResult struct {
-	teamName string
-	wins     bool
 }
 
 func main() {
@@ -101,6 +107,7 @@ func main() {
 	leaguesSvc := leagues.NewService(q, pool)
 	picksSvc := picks.NewService(q, pool)
 	gradingSvc := grading.NewService(q, pool)
+	rng := rand.New(rand.NewSource(randSeed))
 
 	leagueID, err := db.ParseUUID(targetLeagueID)
 	if err != nil {
@@ -112,13 +119,14 @@ func main() {
 	}
 	fmt.Printf("Target league: %q (%s, season %d)\n", league.Name, league.Conference, league.SeasonYear)
 
-	// --- Register 7 fake players and join them to the league ---
+	// --- Register 10 fake players and join them to the league ---
 	names := []string{
 		"Betty Buckeye", "Will Wolverine", "Nora Nittany", "Hugo Hawkeye",
-		"Bree Badger", "Steve Spartan", "Bea Boilermaker",
+		"Bree Badger", "Steve Spartan", "Bea Boilermaker", "Wendy Wildcat",
+		"Gus Golden Gopher", "Terry Terrapin",
 	}
 	players := make([]*player, 0, len(names))
-	for _, name := range names {
+	for i, name := range names {
 		email := fmt.Sprintf("demo.%s@seed.local", slug(name))
 		sess, err := authSvc.Register(ctx, email, "demo12345", name)
 		if err != nil {
@@ -128,76 +136,148 @@ func main() {
 		if err != nil {
 			log.Fatalf("join %s: %v", name, err)
 		}
-		players = append(players, &player{email: email, displayName: name, userID: sess.User.ID, membership: membership})
-		fmt.Printf("  joined: %-16s membership=%s\n", name, db.UUIDString(membership.ID))
+		p := &player{
+			email:       email,
+			displayName: name,
+			userID:      sess.User.ID,
+			membership:  membership,
+			usedTeams:   map[pgtype.UUID]bool{},
+			isSurvivor:  i < survivorCount, // first N in the roster go all the way
+		}
+		players = append(players, p)
+		role := "at-risk"
+		if p.isSurvivor {
+			role = "SURVIVOR"
+		}
+		fmt.Printf("  joined: %-18s (%s) membership=%s\n", name, role, db.UUIDString(membership.ID))
 	}
-	betty, will, nora, hugo, bree, steve, bea := players[0], players[1], players[2], players[3], players[4], players[5], players[6]
 
-	// --- Week 1: 7 players pick, 2 lose (upsets) ---
-	fmt.Println("\n=== Week 1 ===")
-	week1Picks := []weekPick{
-		{betty, "Ohio State", true},
-		{will, "Michigan", true},
-		{nora, "Penn State", true},
-		{hugo, "Oregon", true},
-		{bree, "Washington", false}, // upset
-		{steve, "Indiana", false},   // upset
-		{bea, "Iowa", true},
+	memberIDs := map[pgtype.UUID]bool{}
+	for _, p := range players {
+		memberIDs[p.membership.ID] = true
 	}
-	// The real admin account already has a live pick on Wisconsin this
-	// week — force it to a win so this demo data can't accidentally
-	// eliminate a real user's own account as a side effect.
-	simulateWeek(ctx, q, picksSvc, gradingSvc, leagueID, league.Conference, league.SeasonYear, 1, week1Picks, []namedResult{{"Wisconsin", true}})
-	printWeekResult(week1Picks)
 
-	// --- Week 2: 5 remaining players pick (unused teams), 2 lose ---
-	fmt.Println("\n=== Week 2 ===")
-	week2Picks := []weekPick{
-		{betty, "Michigan", true},
-		{will, "Ohio State", true},
-		{nora, "Iowa", true},
-		{hugo, "Penn State", false}, // upset
-		{bea, "Purdue", false},      // upset
+	// Any OTHER active contestant in this league (a real account, not one
+	// of the players registered above) must never be missing a pick in a
+	// simulated week — a real miss is a genuine loss per the actual game
+	// rules, and this tool has twice now accidentally eliminated the real
+	// admin account as a side effect of simulating weeks they hadn't
+	// personally picked yet, permanently burning their one-time buy-back
+	// both times. Rather than try to undo that after the fact (which
+	// isn't even possible once buy-back is used), every week
+	// auto-fills — and force-wins — a pick for any real member who
+	// doesn't already have one, so they can never be eliminated as a
+	// side effect of this tool. realUserUsedTeams is seeded from each
+	// real member's actual season-to-date pick history (so an
+	// auto-filled pick never repeats a team they already used for real)
+	// and persists across weeks as more auto-fills happen.
+	realUserUsedTeams := map[pgtype.UUID]map[pgtype.UUID]bool{}
+	allMembers, err := leaguesSvc.ListMembers(ctx, leagueID)
+	if err != nil {
+		log.Fatalf("list league members: %v", err)
 	}
-	simulateWeek(ctx, q, picksSvc, gradingSvc, leagueID, league.Conference, league.SeasonYear, 2, week2Picks, nil)
-	printWeekResult(week2Picks)
-
-	// --- Week 3: 3 remaining players ALL pick losers -> mass wipeout ---
-	fmt.Println("\n=== Week 3 (engineered mass-wipeout) ===")
-	week3Picks := []weekPick{
-		{betty, "Michigan State", false},
-		{will, "Purdue", false},
-		{nora, "USC", false},
+	for _, m := range allMembers {
+		if memberIDs[m.MembershipID] || !m.IsContestant || m.Status != "active" {
+			continue
+		}
+		history, err := picksSvc.ListMembershipPicksForSeason(ctx, m.MembershipID, league.SeasonYear)
+		if err != nil {
+			log.Fatalf("load pick history for real member %s: %v", m.DisplayName, err)
+		}
+		used := map[pgtype.UUID]bool{}
+		for _, h := range history {
+			if h.HasPicked {
+				used[h.Row.TeamID] = true
+			}
+		}
+		realUserUsedTeams[m.MembershipID] = used
+		fmt.Printf("  real member detected: %-18s (%d team(s) already used) — will auto-fill any week they haven't picked\n", m.DisplayName, len(used))
 	}
-	simulateWeek(ctx, q, picksSvc, gradingSvc, leagueID, league.Conference, league.SeasonYear, 3, week3Picks, nil)
-	printWeekResult(week3Picks)
 
-	// --- Buy back Steve (eliminated week 1) ---
-	fmt.Println("\n=== Buy-back ===")
 	admin, err := q.GetUserByEmail(ctx, "admin@survivorleague.football")
 	if err != nil {
 		log.Fatalf("find admin user: %v", err)
 	}
-	if _, err := leaguesSvc.BuyBackMember(ctx, leagueID, steve.membership.ID, admin.ID); err != nil {
-		log.Fatalf("buy back steve: %v", err)
+	boughtBack := false
+
+	for week := int32(1); week <= simulatedWeeks; week++ {
+		fmt.Printf("\n=== Week %d ===\n", week)
+		simulateWeek(ctx, q, picksSvc, gradingSvc, leagueID, league.Conference, league.SeasonYear, week, players, memberIDs, realUserUsedTeams, rng)
+		anyActive := false
+		for _, p := range players {
+			status := "still active"
+			if p.eliminated {
+				status = "ELIMINATED"
+			} else {
+				anyActive = true
+			}
+			fmt.Printf("  %-18s -> %s\n", p.displayName, status)
+		}
+		if !anyActive {
+			fmt.Println("  (everyone eliminated — stopping early)")
+			break
+		}
+
+		// Buy back the first newly-eliminated non-survivor immediately —
+		// in the very next week, not some later arbitrary week. No gap
+		// weeks: a real commissioner reinstating someone wouldn't leave
+		// them sitting out for a few weeks first, and a gap would just
+		// reproduce the exact "long stretch with no pick" look this
+		// tool is trying to avoid. Once used, this is a one-time
+		// lifeline (real rule), so a SECOND elimination later leaves
+		// them out for good — no further buy-backs happen.
+		if !boughtBack && week < simulatedWeeks {
+			for _, p := range players {
+				if p.eliminated && !p.isSurvivor {
+					if _, err := leaguesSvc.BuyBackMember(ctx, leagueID, p.membership.ID, admin.ID); err != nil {
+						log.Fatalf("buy back %s: %v", p.displayName, err)
+					}
+					p.eliminated = false // rejoin the active pool starting next week — zero gap
+					fmt.Printf("  -- %s bought back by admin@survivorleague.football, picks again starting week %d --\n", p.displayName, week+1)
+					boughtBack = true
+					break
+				}
+			}
+		}
 	}
-	fmt.Printf("  Steve Spartan bought back by admin@survivorleague.football\n")
+	if !boughtBack {
+		fmt.Println("\n(no eliminated player was available to buy back)")
+	}
 
 	fmt.Println("\n=== Final story ===")
-	fmt.Println("  Active:     Betty, Will, Nora (survived 3 weeks incl. a mass-wipeout), Steve (bought back)")
-	fmt.Println("  Eliminated: Bree (wk1, Washington upset), Hugo (wk2, Penn State upset), Bea (wk2, Purdue upset)")
-	fmt.Println("\nAll 7 demo accounts use password: demo12345 (emails: demo.<name>@seed.local)")
+	for _, p := range players {
+		status := "eliminated"
+		if !p.eliminated {
+			status = "active"
+		}
+		fmt.Printf("  %-18s %s\n", p.displayName, status)
+	}
+	fmt.Println("\nAll demo accounts use password: demo12345 (emails: demo.<name>@seed.local)")
 	fmt.Println("NOTE: this is fabricated local data. The next real schedule sync will overwrite these games' fake final scores with their real (not-yet-played) state.")
 }
 
-// simulateWeek resolves every team name in picksList and forced against
-// the week's REAL schedule (via the same ListAvailableTeamsForWeek query
-// the picks screen itself uses), submits each still-active player's pick,
-// then fabricates a result for the league's ENTIRE conference slate that
-// week — every named/picked game gets its declared outcome, every other
-// game defaults to a home win — and runs the whole batch through the real
-// grading pipeline (GradeGame + TryFinalizeLeagueWeek).
-func simulateWeek(ctx context.Context, q *gen.Queries, picksSvc *picks.Service, gradingSvc *grading.Service, leagueID pgtype.UUID, conference string, seasonYear int32, weekNumber int32, picksList []weekPick, forced []namedResult) {
+// simulateWeek assigns each still-active player an unused Big Ten team for
+// this week (round-robin over the week's real schedule, resolved live —
+// never hardcoded), decides one outcome per game touched (protecting any
+// real user's existing pick first, then a survivor's pick, then a random
+// draw for everyone else, then a default home win for every remaining
+// conference-relevant game so TryFinalizeLeagueWeek can actually
+// finalize), fabricates and grades those results, and updates each
+// player's eliminated flag from the real post-grading DB state.
+func simulateWeek(
+	ctx context.Context,
+	q *gen.Queries,
+	picksSvc *picks.Service,
+	gradingSvc *grading.Service,
+	leagueID pgtype.UUID,
+	conference string,
+	seasonYear int32,
+	weekNumber int32,
+	players []*player,
+	memberIDs map[pgtype.UUID]bool,
+	realUserUsedTeams map[pgtype.UUID]map[pgtype.UUID]bool,
+	rng *rand.Rand,
+) {
 	week, err := q.GetWeekBySeasonAndNumber(ctx, gen.GetWeekBySeasonAndNumberParams{SeasonYear: seasonYear, WeekNumber: weekNumber})
 	if err != nil {
 		log.Fatalf("get week %d: %v", weekNumber, err)
@@ -206,44 +286,151 @@ func simulateWeek(ctx context.Context, q *gen.Queries, picksSvc *picks.Service, 
 	if err != nil {
 		log.Fatalf("list available teams for week %d: %v", weekNumber, err)
 	}
-	byName := make(map[string]gen.ListAvailableTeamsForWeekRow, len(teams))
-	for _, t := range teams {
-		byName[t.TeamName] = t
-	}
-	resolve := func(teamName string) gen.ListAvailableTeamsForWeekRow {
-		row, ok := byName[teamName]
-		if !ok {
-			log.Fatalf("week %d: no game found for team %q (typo, or this team has a bye?)", weekNumber, teamName)
-		}
-		return row
+	if len(teams) == 0 {
+		log.Fatalf("week %d: no %s games this week — reduce simulatedWeeks or pick a different range", weekNumber, conference)
 	}
 
 	// Every conference-relevant game this week defaults to a home win,
-	// then gets overridden by forced results and picked results in turn
-	// (picks always win a conflict — that's the actual story).
-	results := map[pgtype.UUID]bool{} // gameID -> homeWins
+	// then gets overridden below in priority order: a real user's
+	// existing pick > a survivor's pick > a random draw for an at-risk
+	// pick > the default.
+	outcomes := map[pgtype.UUID]bool{} // gameID -> homeWins
 	for _, t := range teams {
-		results[t.GameID] = true
-	}
-	for _, nr := range forced {
-		row := resolve(nr.teamName)
-		results[row.GameID] = (nr.wins == row.IsHome) // team wins == home wins iff the forced team IS home
+		outcomes[t.GameID] = true
 	}
 
-	for _, wp := range picksList {
-		if wp.player.eliminated {
+	// Protect any REAL (non-demo) user's existing pick this week — force
+	// that game to a result matching what they picked, so this tool can
+	// never accidentally eliminate an actual account.
+	existing, err := picksSvc.ListWeekPicks(ctx, leagueID, week.ID)
+	if err != nil {
+		log.Fatalf("list existing week picks for week %d: %v", weekNumber, err)
+	}
+	protectedGames := map[pgtype.UUID]bool{}
+	for _, row := range existing {
+		if !row.HasPicked || memberIDs[row.Row.MembershipID] {
+			continue // not a real user's pick (either no pick, or it's one of ours)
+		}
+		var teamIsHome bool
+		for _, t := range teams {
+			if t.GameID == row.Row.GameID {
+				teamIsHome = t.TeamID == row.Row.TeamID
+				break
+			}
+		}
+		outcomes[row.Row.GameID] = teamIsHome
+		protectedGames[row.Row.GameID] = true
+	}
+
+	// Auto-fill a forced-win pick for any real member who doesn't already
+	// have one this week (realUserUsedTeams is nil/empty for a member the
+	// caller didn't detect as real — nothing to do for the rest, i.e. our
+	// own demo players and anyone already covered by the protection pass
+	// above). See main()'s comment on realUserUsedTeams for why this
+	// exists: a genuine missed pick is a real elimination, and this tool
+	// must never cause that as a side effect for an account it doesn't
+	// own.
+	for _, row := range existing {
+		used, isRealMember := realUserUsedTeams[row.Row.MembershipID]
+		if !isRealMember || row.HasPicked {
 			continue
 		}
-		row := resolve(wp.teamName)
-		if _, err := picksSvc.UpsertPick(ctx, wp.player.membership.ID, week.ID, conference, row.GameID, row.TeamID); err != nil {
-			log.Fatalf("pick %q for %s: %v", wp.teamName, wp.player.displayName, err)
+		var chosen gen.ListAvailableTeamsForWeekRow
+		found := false
+		for _, t := range teams {
+			if !used[t.TeamID] && !protectedGames[t.GameID] {
+				chosen, found = t, true
+				break
+			}
 		}
-		results[row.GameID] = (wp.wins == row.IsHome)
+		if !found {
+			log.Fatalf("week %d: no unused team available to auto-fill for real member %s (membership %s) — they'd be missing a pick and could be eliminated; reduce simulatedWeeks", weekNumber, row.Row.DisplayName, db.UUIDString(row.Row.MembershipID))
+		}
+		if _, err := picksSvc.UpsertPick(ctx, row.Row.MembershipID, week.ID, conference, chosen.GameID, chosen.TeamID); err != nil {
+			log.Fatalf("auto-fill pick for real member %s (week %d): %v", row.Row.DisplayName, weekNumber, err)
+		}
+		used[chosen.TeamID] = true
+		outcomes[chosen.GameID] = chosen.IsHome // force this real member's auto-filled pick to win
+		protectedGames[chosen.GameID] = true
+		fmt.Printf("  auto-filled a pick for real member %s: %s (forced win)\n", row.Row.DisplayName, chosen.TeamName)
+	}
+
+	// Assign each still-active player a team, survivors first (so their
+	// forced wins claim their game before any other player's outcome for
+	// that same game is decided) — round-robin starting at an index
+	// derived from the player+week so different players get variety,
+	// skipping teams that player has already used and games already
+	// claimed this week (by an earlier survivor, or by a real user's
+	// protected pick — claimedThisWeek is pre-seeded with every
+	// protected game below, so no demo player can ever be assigned into
+	// one and no branch here needs to re-check protectedGames itself).
+	claimedThisWeek := map[pgtype.UUID]bool{}
+	for gameID := range protectedGames {
+		claimedThisWeek[gameID] = true
+	}
+	assign := func(p *player) (row gen.ListAvailableTeamsForWeekRow, ok bool) {
+		start := (int(weekNumber)*7 + len(p.displayName)) % len(teams)
+		for i := 0; i < len(teams); i++ {
+			t := teams[(start+i)%len(teams)]
+			if p.usedTeams[t.TeamID] || claimedThisWeek[t.GameID] {
+				continue
+			}
+			return t, true
+		}
+		return gen.ListAvailableTeamsForWeekRow{}, false
+	}
+
+	assignAndSubmit := func(p *player) {
+		row, ok := assign(p)
+		if !ok {
+			if p.isSurvivor {
+				// A guaranteed survivor running out of teams is a real
+				// design problem (too many simulatedWeeks for the
+				// available team pool), not a normal in-story event —
+				// fail loudly rather than silently break the "goes all
+				// the way" guarantee.
+				log.Fatalf("week %d: no unused team left for SURVIVOR %s — reduce simulatedWeeks or survivorCount", weekNumber, p.displayName)
+			}
+			// An at-risk player running out of unused teams for this
+			// week's slate (e.g. their remaining teams all have a bye)
+			// is a legitimate real scenario — treat it exactly like a
+			// real missed pick: submit nothing, let the real
+			// missed-pick-counts-as-loss rule (internal/grading) do the
+			// rest once the week finalizes.
+			fmt.Printf("  (no unused team available for %s this week — treated as a missed pick)\n", p.displayName)
+			return
+		}
+		if _, err := picksSvc.UpsertPick(ctx, p.membership.ID, week.ID, conference, row.GameID, row.TeamID); err != nil {
+			log.Fatalf("pick for %s (week %d): %v", p.displayName, weekNumber, err)
+		}
+		p.usedTeams[row.TeamID] = true
+		claimedThisWeek[row.GameID] = true
+		if p.isSurvivor {
+			outcomes[row.GameID] = row.IsHome // force this survivor's team to win
+		} else {
+			survives := rng.Float64() < winProbability
+			outcomes[row.GameID] = (survives == row.IsHome)
+		}
+	}
+
+	for _, p := range players {
+		if p.eliminated {
+			continue
+		}
+		if p.isSurvivor {
+			assignAndSubmit(p)
+		}
+	}
+	for _, p := range players {
+		if p.eliminated || p.isSurvivor {
+			continue
+		}
+		assignAndSubmit(p)
 	}
 
 	// Fabricate every game's result: kickoff in the past, status final, a
-	// made-up score matching the intended winner.
-	for gameID, homeWins := range results {
+	// made-up score matching the decided outcome.
+	for gameID, homeWins := range outcomes {
 		homeScore, awayScore := 24, 17
 		if !homeWins {
 			homeScore, awayScore = 17, 24
@@ -265,7 +452,7 @@ func simulateWeek(ctx context.Context, q *gen.Queries, picksSvc *picks.Service, 
 	// pairs but can still be the last conference-relevant game
 	// TryFinalizeLeagueWeek was waiting on.
 	finalizedLeagueWeeks := map[[2]pgtype.UUID]bool{{leagueID, week.ID}: true}
-	for gameID := range results {
+	for gameID := range outcomes {
 		pairs, err := gradingSvc.GradeGame(ctx, gameID)
 		if err != nil {
 			log.Fatalf("grade game %s: %v", db.UUIDString(gameID), err)
@@ -280,26 +467,15 @@ func simulateWeek(ctx context.Context, q *gen.Queries, picksSvc *picks.Service, 
 		}
 	}
 
-	// Refresh each player's eliminated status from the DB so the next
-	// week's caller (and this function's own printWeekResult) sees the
-	// real post-grading state.
-	for _, wp := range picksList {
-		m, err := q.GetLeagueMembershipByID(ctx, wp.player.membership.ID)
+	// Refresh each player's eliminated status from the real post-grading
+	// DB state.
+	for _, p := range players {
+		m, err := q.GetLeagueMembershipByID(ctx, p.membership.ID)
 		if err != nil {
-			log.Fatalf("reload membership: %v", err)
+			log.Fatalf("reload membership for %s: %v", p.displayName, err)
 		}
-		wp.player.membership = m
-		wp.player.eliminated = m.Status == "eliminated"
-	}
-}
-
-func printWeekResult(picksList []weekPick) {
-	for _, wp := range picksList {
-		status := "still active"
-		if wp.player.eliminated {
-			status = "ELIMINATED"
-		}
-		fmt.Printf("  %-16s -> %s\n", wp.player.displayName, status)
+		p.membership = m
+		p.eliminated = m.Status == "eliminated"
 	}
 }
 

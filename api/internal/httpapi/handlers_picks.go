@@ -283,6 +283,34 @@ func (a *API) handleListMembershipPicks(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// A currently-eliminated membership never picks again — showing a
+	// long tail of "not picked" rows all the way through the rest of the
+	// season reads as if they kept playing and simply forgot every week,
+	// not as "they were out." Truncate at (inclusive of) their
+	// elimination week instead. A bought-back membership is active again
+	// (status flips back to 'active', though eliminated_week_id stays as
+	// history per the buy-back contract — see leagues.BuyBackMember), so
+	// this deliberately checks current Status, not whether
+	// EliminatedWeekID is set.
+	if target.Status == "eliminated" && target.EliminatedWeekID.Valid {
+		var eliminatedAtWeekNumber int32 = -1
+		for _, row := range rows {
+			if row.Row.WeekID == target.EliminatedWeekID {
+				eliminatedAtWeekNumber = row.Row.WeekNumber
+				break
+			}
+		}
+		if eliminatedAtWeekNumber >= 0 {
+			truncated := rows[:0:0]
+			for _, row := range rows {
+				if row.Row.WeekNumber <= eliminatedAtWeekNumber {
+					truncated = append(truncated, row)
+				}
+			}
+			rows = truncated
+		}
+	}
+
 	isOwn := membershipID == lc.Membership.ID
 	out := make([]membershipWeekPickResponse, 0, len(rows))
 	for _, row := range rows {

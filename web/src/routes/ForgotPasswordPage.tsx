@@ -3,6 +3,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
 import { Link } from 'react-router-dom'
 import { forgotPasswordSchema, type ForgotPasswordFormValues } from '../auth/schemas'
+import { BrandWordmark } from '../components/BrandWordmark'
 import { forgotPassword, ApiError } from '../api'
 
 // POST /auth/forgot-password always responds 202 with the same message
@@ -36,10 +37,11 @@ export function ForgotPasswordPage() {
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
       <div className="max-w-sm w-full space-y-4 rounded-xl border border-slate-800 bg-slate-900 p-6 shadow-lg">
-        <div>
-          <h1 className="text-xl font-semibold">Forgot password</h1>
-          <p className="text-sm text-slate-400">Survivor League</p>
+        <div className="flex justify-center">
+          <BrandWordmark size={140} />
         </div>
+
+        <h1 className="text-xl font-semibold text-center">Forgot password</h1>
 
         {submitted ? (
           <p className="text-sm text-slate-300">
@@ -73,7 +75,7 @@ export function ForgotPasswordPage() {
           </form>
         )}
 
-        <p className="text-sm text-slate-400">
+        <p className="text-sm text-slate-500">
           <Link to="/login" className="text-slate-200 underline">
             Back to log in
           </Link>

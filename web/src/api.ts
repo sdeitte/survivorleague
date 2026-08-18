@@ -130,7 +130,7 @@ export interface League {
   season_year: number
   conference: string
   commissioner_user_id: string
-  status: 'active'
+  status: 'active' | 'closed'
   created_at: string
   membership: MembershipSummary
 }
@@ -165,12 +165,19 @@ export interface Membership {
 
 export interface InviteCodeResponse {
   invite_code: string
+  // False once the league is closed, or once its conference's week 1 has
+  // no pickable games left — the commissioner's own invite code/invite-by-
+  // email UI hides once this flips, since no one can actually join anymore.
+  joinable: boolean
 }
 
 export interface InvitePreviewResponse {
   league_name: string
   conference: string
   season_year: number
+  // False once the league is closed, or once its conference's week 1 has
+  // no pickable games left (games have started — no new members mid-season).
+  joinable: boolean
 }
 
 export interface Week {
@@ -458,6 +465,14 @@ export async function removeMember(leagueId: string, membershipId: string): Prom
   await apiFetch<void>(`/leagues/${leagueId}/members/${membershipId}`, { method: 'DELETE' })
 }
 
+// closeLeague requires the commissioner to have typed the exact phrase
+// "I want to close {league name}" — see handleCloseLeague's doc comment on
+// the API side for why this is checked server-side too, not just gated by
+// the confirmation modal's disabled-until-matching button.
+export async function closeLeague(leagueId: string, confirm: string): Promise<League> {
+  return apiFetch<League>(`/leagues/${leagueId}`, { method: 'DELETE', body: { confirm } })
+}
+
 export async function buyBackMember(leagueId: string, membershipId: string): Promise<Membership> {
   return apiFetch<Membership>(`/leagues/${leagueId}/members/${membershipId}/buyback`, { method: 'POST' })
 }
@@ -468,6 +483,23 @@ export async function getInviteCode(leagueId: string): Promise<InviteCodeRespons
 
 export async function regenerateInviteCode(leagueId: string): Promise<InviteCodeResponse> {
   return apiFetch<InviteCodeResponse>(`/leagues/${leagueId}/invite/regenerate`, { method: 'POST' })
+}
+
+export interface InviteSendResult {
+  email: string
+  sent: boolean
+  error?: string
+}
+
+// sendInvites emails the league's existing invite code/link to a batch of
+// name+email pairs — always resolves (even on partial failure); check each
+// entry's `sent` flag rather than a thrown ApiError for per-recipient
+// outcomes. See the API's handleSendInvites doc comment for why.
+export async function sendInvites(
+  leagueId: string,
+  invites: { name: string; email: string }[],
+): Promise<InviteSendResult[]> {
+  return apiFetch<InviteSendResult[]>(`/leagues/${leagueId}/invite/send`, { method: 'POST', body: { invites } })
 }
 
 export async function previewInvite(code: string): Promise<InvitePreviewResponse> {
@@ -483,6 +515,14 @@ export async function joinLeagueByCode(code: string): Promise<League> {
 
 export async function listWeeks(seasonYear: number): Promise<Week[]> {
   return apiFetch<Week[]>(`/weeks?season_year=${seasonYear}`)
+}
+
+// getCurrentWeek backs the picks screen's default week selection: the
+// week that is "currently occurring" schedule-wise for the league's
+// conference (see the API's own doc comment for the exact rule). 404s if
+// no schedule data has synced yet for this league's conference/season.
+export async function getCurrentWeek(leagueId: string): Promise<Week> {
+  return apiFetch<Week>(`/leagues/${leagueId}/current-week`)
 }
 
 // listWeekGames backs the admin "resync a game" picker (Phase 8) — lets an

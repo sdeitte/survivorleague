@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -91,6 +92,37 @@ func (a *API) handleGetGame(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, toGameResponseFromGetRow(row))
+}
+
+// handleGetCurrentWeek implements GET /leagues/:id/current-week
+// (requireLeagueMember) — the week that is "currently occurring"
+// schedule-wise for the league's conference, per
+// schedule.Service.CurrentWeek's rule. 404 if the league's season has no
+// synced games for its conference yet (no sync has run, or the sync
+// hasn't reached this conference).
+func (a *API) handleGetCurrentWeek(w http.ResponseWriter, r *http.Request) {
+	lc, ok := LeagueFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusForbidden, "not a member of this league")
+		return
+	}
+
+	row, err := a.scheduleService.CurrentWeek(r.Context(), lc.League.SeasonYear, lc.League.Conference, time.Now())
+	if err != nil {
+		if errors.Is(err, schedule.ErrNoScheduleData) {
+			writeError(w, http.StatusNotFound, "no schedule data synced yet for this league's conference/season")
+			return
+		}
+		log.Printf("get current week: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to determine current week")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, weekResponse{
+		ID:         db.UUIDString(row.WeekID),
+		SeasonYear: lc.League.SeasonYear,
+		WeekNumber: row.WeekNumber,
+	})
 }
 
 // handleListTeams implements GET /teams?conference= (requireAuth).

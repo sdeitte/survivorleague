@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Controller, useForm } from 'react-hook-form';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useAuth } from '../auth/AuthContext';
+import { BrandWordmark } from '../components/BrandWordmark';
 import * as api from '../api';
 import { createLeagueSchema, type CreateLeagueFormValues } from '../leagues/schemas';
 import { ApiError } from '../api';
@@ -48,6 +49,10 @@ export function CreateLeagueScreen({
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
+      <View style={styles.brandRow}>
+        <BrandWordmark size={90} />
+      </View>
+
       <Text style={styles.title}>Create a league</Text>
       <Text style={styles.subtitle}>You'll be its commissioner and a playing contestant.</Text>
 
@@ -137,6 +142,9 @@ export function CreateLeagueScreen({
 }
 
 const styles = StyleSheet.create({
+  brandRow: {
+    alignItems: 'center',
+  },
   container: {
     flexGrow: 1,
     backgroundColor: '#0f172a',

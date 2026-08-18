@@ -256,6 +256,49 @@ func (q *Queries) ListActiveMembersWithUser(ctx context.Context, leagueID pgtype
 	return items, nil
 }
 
+const listLeagueMemberEmails = `-- name: ListLeagueMemberEmails :many
+SELECT m.id AS membership_id, u.id AS user_id, u.email AS email, u.display_name AS display_name
+FROM league_memberships m
+JOIN users u ON u.id = m.user_id
+WHERE m.league_id = $1 AND m.removed_at IS NULL
+ORDER BY m.created_at ASC
+`
+
+type ListLeagueMemberEmailsRow struct {
+	MembershipID pgtype.UUID `json:"membership_id"`
+	UserID       pgtype.UUID `json:"user_id"`
+	Email        string      `json:"email"`
+	DisplayName  string      `json:"display_name"`
+}
+
+// Backs the league-deletion email notification (internal/leagues.Service.
+// DeleteLeague) — needs each member's email/display_name, which
+// ListActiveMembersWithUser doesn't select since no other caller needs it.
+func (q *Queries) ListLeagueMemberEmails(ctx context.Context, leagueID pgtype.UUID) ([]ListLeagueMemberEmailsRow, error) {
+	rows, err := q.db.Query(ctx, listLeagueMemberEmails, leagueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListLeagueMemberEmailsRow{}
+	for rows.Next() {
+		var i ListLeagueMemberEmailsRow
+		if err := rows.Scan(
+			&i.MembershipID,
+			&i.UserID,
+			&i.Email,
+			&i.DisplayName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const removeMembership = `-- name: RemoveMembership :one
 UPDATE league_memberships
 SET removed_at = now(), updated_at = now()

@@ -1,11 +1,15 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
+	"net/mail"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -194,6 +198,65 @@ func (a *API) handleUpdateLeague(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toLeagueResponse(league, lc.Membership.ID, lc.Membership.Role, isContestant, lc.Membership.Status))
 }
 
+// handleCloseLeague implements DELETE /leagues/:id (requireCommissioner —
+// deliberately not chained with requireLeagueOpen, so closing an
+// already-closed league still reaches leagues.Service.CloseLeague and gets
+// a clean 409 rather than the generic "league is closed" 403). This is NOT
+// a hard delete — see leagues.Service.CloseLeague's doc comment; the
+// league, its memberships, and its picks/history all stay in the
+// database, just no longer mutable.
+//
+// Requires the request body's "confirm" field to exactly match
+// "I want to close {league name}" — the server-side half of the web/
+// mobile confirmation modal that makes the commissioner type this out by
+// hand (paste disabled client-side); this check exists so a bare API call
+// can't bypass that confirmation.
+func (a *API) handleCloseLeague(w http.ResponseWriter, r *http.Request) {
+	lc, ok := LeagueFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusForbidden, "not a member of this league")
+		return
+	}
+
+	var body struct {
+		Confirm string `json:"confirm"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	expected := "I want to close " + lc.League.Name
+	if strings.TrimSpace(body.Confirm) != expected {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("confirmation text must exactly match %q", expected))
+		return
+	}
+
+	league, members, err := a.leaguesService.CloseLeague(r.Context(), lc.League.ID, lc.Membership.UserID)
+	if err != nil {
+		if errors.Is(err, leagues.ErrLeagueAlreadyClosed) {
+			writeError(w, http.StatusConflict, "this league is already closed")
+			return
+		}
+		log.Printf("close league: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to close league")
+		return
+	}
+
+	if a.notifyService != nil {
+		for _, m := range members {
+			if m.UserID == lc.Membership.UserID {
+				continue // skip the commissioner who just performed the action
+			}
+			if err := a.notifyService.SendLeagueClosedEmail(r.Context(), m.Email, m.DisplayName, league.Name); err != nil {
+				log.Printf("close league: send closed email to %s: %v", db.UUIDString(m.UserID), err)
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, toLeagueResponse(league, lc.Membership.ID, lc.Membership.Role, lc.Membership.IsContestant, lc.Membership.Status))
+}
+
 func (a *API) handleListMembers(w http.ResponseWriter, r *http.Request) {
 	lc, ok := LeagueFromContext(r.Context())
 	if !ok {
@@ -334,13 +397,29 @@ func (a *API) handleGetInviteCode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "not a member of this league")
 		return
 	}
-	writeJSON(w, http.StatusOK, inviteCodeResponse{InviteCode: lc.League.InviteCode})
+	joinable, err := a.isLeagueJoinable(r.Context(), lc.League)
+	if err != nil {
+		log.Printf("get invite code: check joinable: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to load invite code")
+		return
+	}
+	writeJSON(w, http.StatusOK, inviteCodeResponse{InviteCode: lc.League.InviteCode, Joinable: joinable})
 }
 
 func (a *API) handleRegenerateInviteCode(w http.ResponseWriter, r *http.Request) {
 	lc, ok := LeagueFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusForbidden, "not a member of this league")
+		return
+	}
+	joinable, err := a.isLeagueJoinable(r.Context(), lc.League)
+	if err != nil {
+		log.Printf("regenerate invite code: check joinable: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to regenerate invite code")
+		return
+	}
+	if !joinable {
+		writeError(w, http.StatusForbidden, "this league has already started and isn't accepting new members")
 		return
 	}
 
@@ -350,7 +429,94 @@ func (a *API) handleRegenerateInviteCode(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed to regenerate invite code")
 		return
 	}
-	writeJSON(w, http.StatusOK, inviteCodeResponse{InviteCode: updated.InviteCode})
+	writeJSON(w, http.StatusOK, inviteCodeResponse{InviteCode: updated.InviteCode, Joinable: joinable})
+}
+
+// maxInvitesPerRequest caps a single POST .../invite/send batch — plenty
+// of headroom for this app's scale (friends-and-family leagues), small
+// enough to keep one commissioner action from turning into a mass-mail
+// blast.
+const maxInvitesPerRequest = 25
+
+// handleSendInvites implements POST /leagues/:id/invite/send
+// (requireCommissioner, requireLeagueOpen). Sends the league's existing
+// shareable invite code/link by email to a batch of name+email pairs — no
+// new per-recipient tracking state, just reuses lc.League.InviteCode via
+// notify.Service.SendLeagueInviteEmail. Deliberately best-effort per
+// recipient rather than all-or-nothing: one bad email in a batch of 20
+// shouldn't silently swallow the other 19, so this always responds 200
+// with a per-recipient sent/error breakdown once the request itself is
+// well-formed (only an empty or oversized batch is a 400).
+func (a *API) handleSendInvites(w http.ResponseWriter, r *http.Request) {
+	lc, ok := LeagueFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusForbidden, "not a member of this league")
+		return
+	}
+	joinable, err := a.isLeagueJoinable(r.Context(), lc.League)
+	if err != nil {
+		log.Printf("send invites: check joinable: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to send invites")
+		return
+	}
+	if !joinable {
+		writeError(w, http.StatusForbidden, "this league has already started and isn't accepting new members")
+		return
+	}
+
+	var body struct {
+		Invites []struct {
+			Name  string `json:"name"`
+			Email string `json:"email"`
+		} `json:"invites"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(body.Invites) == 0 {
+		writeError(w, http.StatusBadRequest, "at least one invite is required")
+		return
+	}
+	if len(body.Invites) > maxInvitesPerRequest {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("too many invites in one request (max %d)", maxInvitesPerRequest))
+		return
+	}
+	if a.notifyService == nil {
+		writeError(w, http.StatusInternalServerError, "email delivery is not configured")
+		return
+	}
+
+	results := make([]inviteSendResultResponse, 0, len(body.Invites))
+	seen := make(map[string]bool, len(body.Invites))
+	for _, inv := range body.Invites {
+		email := strings.TrimSpace(inv.Email)
+		name := strings.TrimSpace(inv.Name)
+
+		if email == "" {
+			results = append(results, inviteSendResultResponse{Email: email, Sent: false, Error: "email is required"})
+			continue
+		}
+		if _, err := mail.ParseAddress(email); err != nil {
+			results = append(results, inviteSendResultResponse{Email: email, Sent: false, Error: "invalid email address"})
+			continue
+		}
+		normalized := strings.ToLower(email)
+		if seen[normalized] {
+			results = append(results, inviteSendResultResponse{Email: email, Sent: false, Error: "duplicate in this request"})
+			continue
+		}
+		seen[normalized] = true
+
+		if err := a.notifyService.SendLeagueInviteEmail(r.Context(), email, name, lc.League.Name, lc.League.Conference, lc.League.SeasonYear, lc.League.InviteCode); err != nil {
+			log.Printf("send invite email to %s: %v", email, err)
+			results = append(results, inviteSendResultResponse{Email: email, Sent: false, Error: "failed to send email"})
+			continue
+		}
+		results = append(results, inviteSendResultResponse{Email: email, Sent: true})
+	}
+
+	writeJSON(w, http.StatusOK, results)
 }
 
 func (a *API) handlePreviewInvite(w http.ResponseWriter, r *http.Request) {
@@ -367,11 +533,33 @@ func (a *API) handlePreviewInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	joinable, err := a.isLeagueJoinable(r.Context(), league)
+	if err != nil {
+		log.Printf("preview invite: check joinable: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to look up invite")
+		return
+	}
+
 	writeJSON(w, http.StatusOK, invitePreviewResponse{
 		LeagueName: league.Name,
 		Conference: league.Conference,
 		SeasonYear: league.SeasonYear,
+		Joinable:   joinable,
 	})
+}
+
+// isLeagueJoinable is shared by handlePreviewInvite (so an anonymous
+// visitor sees "this league has already started" up front) and
+// handleJoinByCode (which enforces it). A league stops accepting new
+// members once it's closed, or once its conference's week 1 has no
+// pickable games left — see schedule.Service.IsFirstWeekPickableForConference's
+// doc comment for why that's the chosen "season has started" line rather
+// than "any game anywhere has kicked off".
+func (a *API) isLeagueJoinable(ctx context.Context, league gen.League) (bool, error) {
+	if league.Status == "closed" {
+		return false, nil
+	}
+	return a.scheduleService.IsFirstWeekPickableForConference(ctx, league.SeasonYear, league.Conference, time.Now())
 }
 
 func (a *API) handleJoinByCode(w http.ResponseWriter, r *http.Request) {
@@ -395,6 +583,20 @@ func (a *API) handleJoinByCode(w http.ResponseWriter, r *http.Request) {
 		}
 		log.Printf("join by code: get league: %v", err)
 		writeError(w, http.StatusInternalServerError, "failed to look up invite")
+		return
+	}
+	if league.Status == "closed" {
+		writeError(w, http.StatusForbidden, "this league is closed")
+		return
+	}
+	joinable, err := a.isLeagueJoinable(r.Context(), league)
+	if err != nil {
+		log.Printf("join by code: check joinable: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to check league schedule")
+		return
+	}
+	if !joinable {
+		writeError(w, http.StatusForbidden, "this league has already started and isn't accepting new members")
 		return
 	}
 

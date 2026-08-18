@@ -3,6 +3,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { Controller, useForm } from 'react-hook-form';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useAuth } from '../auth/AuthContext';
+import { BrandWordmark } from '../components/BrandWordmark';
 import * as api from '../api';
 import { ApiError, type InvitePreviewResponse } from '../api';
 import { joinCodeSchema, type JoinCodeFormValues } from '../leagues/schemas';
@@ -65,6 +66,10 @@ export function JoinLeagueScreen({
 
   return (
     <View style={styles.container}>
+      <View style={styles.brandRow}>
+        <BrandWordmark size={90} />
+      </View>
+
       <Text style={styles.title}>Join a league</Text>
       <Text style={styles.subtitle}>Enter the invite code your commissioner shared.</Text>
 
@@ -110,24 +115,42 @@ export function JoinLeagueScreen({
 
           {serverError && <Text style={styles.error}>{serverError}</Text>}
 
-          <View style={styles.row}>
-            <Pressable
-              style={[styles.buttonOutline, styles.rowButton]}
-              onPress={() => {
-                setPreview(null);
-                setServerError(null);
-              }}
-            >
-              <Text style={styles.buttonOutlineText}>Back</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.button, styles.rowButton, isJoining && styles.buttonDisabled]}
-              onPress={() => void onConfirmJoin()}
-              disabled={isJoining}
-            >
-              {isJoining ? <ActivityIndicator color="#0f172a" /> : <Text style={styles.buttonText}>Join league</Text>}
-            </Pressable>
-          </View>
+          {!preview.joinable ? (
+            <>
+              <Text style={styles.lockedNotice}>
+                This league has already started and isn't accepting new members — ask your commissioner about
+                other options.
+              </Text>
+              <Pressable
+                style={styles.buttonOutline}
+                onPress={() => {
+                  setPreview(null);
+                  setServerError(null);
+                }}
+              >
+                <Text style={styles.buttonOutlineText}>Back</Text>
+              </Pressable>
+            </>
+          ) : (
+            <View style={styles.row}>
+              <Pressable
+                style={[styles.buttonOutline, styles.rowButton]}
+                onPress={() => {
+                  setPreview(null);
+                  setServerError(null);
+                }}
+              >
+                <Text style={styles.buttonOutlineText}>Back</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.button, styles.rowButton, isJoining && styles.buttonDisabled]}
+                onPress={() => void onConfirmJoin()}
+                disabled={isJoining}
+              >
+                {isJoining ? <ActivityIndicator color="#0f172a" /> : <Text style={styles.buttonText}>Join league</Text>}
+              </Pressable>
+            </View>
+          )}
         </>
       )}
 
@@ -139,6 +162,9 @@ export function JoinLeagueScreen({
 }
 
 const styles = StyleSheet.create({
+  brandRow: {
+    alignItems: 'center',
+  },
   container: {
     flex: 1,
     backgroundColor: '#0f172a',
@@ -200,6 +226,10 @@ const styles = StyleSheet.create({
   error: {
     color: '#f87171',
     fontSize: 12,
+  },
+  lockedNotice: {
+    color: '#fbbf24',
+    fontSize: 13,
   },
   button: {
     backgroundColor: '#f1f5f9',

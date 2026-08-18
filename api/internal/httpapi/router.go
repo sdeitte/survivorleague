@@ -111,18 +111,21 @@ func NewRouter(d Deps) http.Handler {
 
 	r.Route("/leagues/{id}", func(r chi.Router) {
 		r.With(a.RequireLeagueMember).Get("/", a.handleGetLeague)
-		r.With(a.RequireCommissioner).Patch("/", a.handleUpdateLeague)
+		r.With(a.RequireCommissioner, a.RequireLeagueOpen).Patch("/", a.handleUpdateLeague)
+		r.With(a.RequireCommissioner).Delete("/", a.handleCloseLeague)
 		r.With(a.RequireLeagueMember).Get("/members", a.handleListMembers)
 		r.With(a.RequireLeagueMember).Get("/members/{membershipId}/picks", a.handleListMembershipPicks)
 		r.With(a.RequireLeagueMember).Get("/leaderboard", a.handleGetLeaderboard)
-		r.With(a.RequireCommissioner).Delete("/members/{membershipId}", a.handleRemoveMember)
-		r.With(a.RequireCommissioner).Post("/members/{membershipId}/buyback", a.handleBuyBackMember)
+		r.With(a.RequireLeagueMember).Get("/current-week", a.handleGetCurrentWeek)
+		r.With(a.RequireCommissioner, a.RequireLeagueOpen).Delete("/members/{membershipId}", a.handleRemoveMember)
+		r.With(a.RequireCommissioner, a.RequireLeagueOpen).Post("/members/{membershipId}/buyback", a.handleBuyBackMember)
 		r.With(a.RequireCommissioner).Get("/invite", a.handleGetInviteCode)
-		r.With(a.RequireCommissioner).Post("/invite/regenerate", a.handleRegenerateInviteCode)
+		r.With(a.RequireCommissioner, a.RequireLeagueOpen).Post("/invite/regenerate", a.handleRegenerateInviteCode)
+		r.With(a.RequireCommissioner, a.RequireLeagueOpen).Post("/invite/send", a.handleSendInvites)
 
 		r.Route("/weeks/{weekId}", func(r chi.Router) {
 			r.With(a.RequireLeagueMember).Get("/picks/me", a.handleGetMyPick)
-			r.With(a.RequireLeagueMember).Put("/picks/me", a.handleUpsertMyPick)
+			r.With(a.RequireLeagueMember, a.RequireLeagueOpen).Put("/picks/me", a.handleUpsertMyPick)
 			r.With(a.RequireLeagueMember).Get("/available-teams", a.handleListAvailableTeams)
 			r.With(a.RequireLeagueMember).Get("/picks", a.handleListWeekPicks)
 		})

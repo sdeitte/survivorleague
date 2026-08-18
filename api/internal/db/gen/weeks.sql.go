@@ -119,6 +119,64 @@ func (q *Queries) ListLiveWindowWeeks(ctx context.Context, arg ListLiveWindowWee
 	return items, nil
 }
 
+const listWeekKickoffRangesForConference = `-- name: ListWeekKickoffRangesForConference :many
+SELECT
+    w.id AS week_id,
+    w.week_number,
+    min(g.kickoff_at)::timestamptz AS min_kickoff,
+    max(g.kickoff_at)::timestamptz AS max_kickoff
+FROM weeks w
+JOIN games g ON g.week_id = w.id
+JOIN teams t ON (t.id = g.home_team_id OR t.id = g.away_team_id) AND t.conference = $1
+WHERE w.season_year = $2
+GROUP BY w.id, w.week_number
+ORDER BY w.week_number ASC
+`
+
+type ListWeekKickoffRangesForConferenceParams struct {
+	Conference string `json:"conference"`
+	SeasonYear int32  `json:"season_year"`
+}
+
+type ListWeekKickoffRangesForConferenceRow struct {
+	WeekID     pgtype.UUID        `json:"week_id"`
+	WeekNumber int32              `json:"week_number"`
+	MinKickoff pgtype.Timestamptz `json:"min_kickoff"`
+	MaxKickoff pgtype.Timestamptz `json:"max_kickoff"`
+}
+
+// Every week of the season that has at least one game involving a team
+// in conference, with that week's earliest and latest kickoff among
+// those games. Backs the "current week" calculation (the week whose
+// kickoff window brackets now, or — in the gap between one week ending
+// and the next starting — the nearest upcoming week): the service layer
+// picks the right row from this list, this query just supplies the
+// per-week ranges in week order.
+func (q *Queries) ListWeekKickoffRangesForConference(ctx context.Context, arg ListWeekKickoffRangesForConferenceParams) ([]ListWeekKickoffRangesForConferenceRow, error) {
+	rows, err := q.db.Query(ctx, listWeekKickoffRangesForConference, arg.Conference, arg.SeasonYear)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListWeekKickoffRangesForConferenceRow{}
+	for rows.Next() {
+		var i ListWeekKickoffRangesForConferenceRow
+		if err := rows.Scan(
+			&i.WeekID,
+			&i.WeekNumber,
+			&i.MinKickoff,
+			&i.MaxKickoff,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWeeksBySeasonYear = `-- name: ListWeeksBySeasonYear :many
 SELECT id, season_year, week_number, created_at, updated_at FROM weeks WHERE season_year = $1 ORDER BY week_number ASC
 `

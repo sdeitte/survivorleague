@@ -11,6 +11,37 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const closeLeague = `-- name: CloseLeague :one
+UPDATE leagues
+SET status = 'closed', updated_at = now()
+WHERE id = $1 AND status != 'closed'
+RETURNING id, name, season_year, conference, commissioner_user_id, invite_code, status, created_at, updated_at
+`
+
+// Closes a league (Commissioner-only). Deliberately an UPDATE, not a
+// DELETE — the league row, its memberships, picks, and full history all
+// stay in place; only status flips. See
+// internal/leagues.Service.CloseLeague's doc comment for what "closed"
+// means to the rest of the API. WHERE status != 'closed' guards against a
+// double-close (concurrent or repeated) returning no rows, which the
+// service maps to ErrLeagueAlreadyClosed.
+func (q *Queries) CloseLeague(ctx context.Context, id pgtype.UUID) (League, error) {
+	row := q.db.QueryRow(ctx, closeLeague, id)
+	var i League
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.SeasonYear,
+		&i.Conference,
+		&i.CommissionerUserID,
+		&i.InviteCode,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const countLeaguesAdmin = `-- name: CountLeaguesAdmin :one
 SELECT count(*) FROM leagues
 `

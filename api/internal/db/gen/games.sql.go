@@ -188,6 +188,7 @@ UPDATE games SET
     home_score = $2,
     away_score = $3,
     winner_team_id = (CASE WHEN $4::boolean THEN home_team_id ELSE away_team_id END),
+    graded_at = NULL,
     updated_at = now()
 WHERE id = $5
 RETURNING id, external_id, week_id, home_team_id, away_team_id, kickoff_at, status, home_score, away_score, winner_team_id, graded_at, created_at, updated_at
@@ -204,10 +205,15 @@ type SeedFinalizeGameParams struct {
 // Local-dev-only: fabricates a completed result for an already-synced
 // game (used by cmd/seed-demo, never by the running server). Sets
 // kickoff_at into the past, status='final', a made-up score, and
-// winner_team_id derived from home_wins — but deliberately leaves
-// graded_at untouched (NULL) so the real grading.Service.GradeGame path
-// (its normal idempotency guard) is what actually grades it, keeping the
-// fabricated data exactly as internally consistent as a real result.
+// winner_team_id derived from home_wins. Explicitly resets graded_at to
+// NULL so the real grading.Service.GradeGame path (its normal idempotency
+// guard) is what actually grades it, keeping the fabricated data exactly
+// as internally consistent as a real result — this must be an explicit
+// reset, not just "leave it NULL", because a game reused across multiple
+// seed-demo runs (e.g. after cmd/reset-schedule, which deliberately
+// preserves graded_at when it restores everything else from CFBD) would
+// otherwise still be stamped from the previous run, silently short-circuiting
+// GradeGame's guard and leaving every pick on it stuck at 'pending' forever.
 func (q *Queries) SeedFinalizeGame(ctx context.Context, arg SeedFinalizeGameParams) (Game, error) {
 	row := q.db.QueryRow(ctx, seedFinalizeGame,
 		arg.KickoffAt,

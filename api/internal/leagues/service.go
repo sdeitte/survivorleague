@@ -36,6 +36,9 @@ var (
 	// status history, so a member eliminated a second time after being
 	// bought back does not get a second one.
 	ErrAlreadyBoughtBack = errors.New("leagues: membership has already used its one-time buy-back")
+	// ErrLeagueAlreadyClosed is returned by CloseLeague when the league's
+	// status is already 'closed'.
+	ErrLeagueAlreadyClosed = errors.New("leagues: league is already closed")
 )
 
 // Notifier is the notification-enqueueing surface BuyBackMember calls
@@ -373,6 +376,78 @@ func (s *Service) BuyBackMember(ctx context.Context, leagueID, membershipID, act
 	}
 
 	return updated, nil
+}
+
+// CloseLeague closes a league: sets status='closed'. This is NOT a
+// delete — the league row, its memberships, picks, and full history all
+// stay in the database exactly as they were. What "closed" actually
+// changes:
+//   - httpapi.RequireLeagueOpen rejects every mutating league/pick/join
+//     route (new picks, buy-backs, member removal, invite regeneration,
+//     joining by code) once a league's status is 'closed'.
+//   - Read-only routes (get league, members, leaderboard, pick history)
+//     keep working — a closed league stays visible, rendered as disabled
+//     in the UI, rather than disappearing.
+//
+// There is no reopen endpoint exposed to commissioners — from their side
+// this is one-way — but the data itself is fully intact underneath and
+// could be restored (status flipped back) via direct DB access or a
+// future admin tool, deliberately unlike a hard delete.
+//
+// Returns the closed league and its member list (loaded before the
+// close) so the caller can notify former members after the transaction
+// commits, or ErrLeagueAlreadyClosed if the league was already closed —
+// note this also covers "league doesn't exist", but every caller of this
+// method sits behind RequireCommissioner, which already 404s a
+// nonexistent league before this is ever reached.
+func (s *Service) CloseLeague(ctx context.Context, leagueID, actorUserID pgtype.UUID) (gen.League, []gen.ListLeagueMemberEmailsRow, error) {
+	members, err := s.queries.ListLeagueMemberEmails(ctx, leagueID)
+	if err != nil {
+		return gen.League{}, nil, fmt.Errorf("leagues: list members before close: %w", err)
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return gen.League{}, nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }() // no-op once committed
+
+	qtx := s.queries.WithTx(tx)
+
+	closed, err := qtx.CloseLeague(ctx, leagueID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return gen.League{}, nil, ErrLeagueAlreadyClosed
+		}
+		return gen.League{}, nil, err
+	}
+
+	metadata := map[string]any{
+		"name":         closed.Name,
+		"conference":   closed.Conference,
+		"season_year":  closed.SeasonYear,
+		"member_count": len(members),
+	}
+	metadataJSON, merr := json.Marshal(metadata)
+	if merr != nil {
+		return gen.League{}, nil, fmt.Errorf("leagues: marshal close_league audit_log metadata: %w", merr)
+	}
+	if _, err := qtx.CreateAuditLog(ctx, gen.CreateAuditLogParams{
+		ActorUserID: actorUserID,
+		LeagueID:    leagueID,
+		Action:      "close_league",
+		TargetType:  pgtype.Text{String: "league", Valid: true},
+		TargetID:    leagueID,
+		Metadata:    metadataJSON,
+	}); err != nil {
+		return gen.League{}, nil, fmt.Errorf("leagues: write close_league audit_log row: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return gen.League{}, nil, err
+	}
+
+	return closed, members, nil
 }
 
 // pgUUIDStringOrNil returns the UUID's string form, or nil for a JSON

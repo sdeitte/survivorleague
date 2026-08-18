@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html"
 	"log"
+	"net/url"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -53,19 +54,35 @@ type Service struct {
 	pushSender  PushSender
 	emailSender EmailSender
 	maxAttempts int32
+	webBaseURL  string
+}
+
+// Option configures a Service at construction time.
+type Option func(*Service)
+
+// WithWebBaseURL sets the frontend base URL used to build the join link in
+// SendLeagueInviteEmail (mirrors internal/auth.WithWebBaseURL's identical
+// role for password-reset/verification links). Omitted in tests that don't
+// exercise that email.
+func WithWebBaseURL(url string) Option {
+	return func(s *Service) { s.webBaseURL = url }
 }
 
 // NewService constructs a Service. pushSender/emailSender are almost
 // always the real ExpoPushSender/ResendEmailSender in production, and a
 // test fake everywhere else — see the package doc comment.
-func NewService(queries *gen.Queries, pool *pgxpool.Pool, pushSender PushSender, emailSender EmailSender) *Service {
-	return &Service{
+func NewService(queries *gen.Queries, pool *pgxpool.Pool, pushSender PushSender, emailSender EmailSender, opts ...Option) *Service {
+	s := &Service{
 		queries:     queries,
 		pool:        pool,
 		pushSender:  pushSender,
 		emailSender: emailSender,
 		maxAttempts: DefaultMaxAttempts,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // notificationPayload is the shape written to notification_outbox.payload
@@ -205,6 +222,59 @@ func (s *Service) EnqueuePickReminder(ctx context.Context, membershipID, leagueI
 	body := fmt.Sprintf("You haven't made your pick in %s yet — your deadline is in %s.", league.Name, windowLabel)
 	dedupeBase := fmt.Sprintf("%s:%s:%s:%s", TypePickReminder, window, db.UUIDString(membershipID), db.UUIDString(weekID))
 	return s.enqueueEvent(ctx, membership.UserID, leagueID, weekID, TypePickReminder, []string{ChannelPush, ChannelEmail}, dedupeBase, title, body)
+}
+
+// SendLeagueClosedEmail sends a direct, synchronous transactional email
+// informing a member that their league was closed by its commissioner.
+// Deliberately bypasses the outbox/preferences/dedupe machinery the five
+// Enqueue* event types use — this is a one-off commissioner action with no
+// retry-worthy dedupe key. Errors are the caller's to log, not fail on —
+// see internal/leagues.Service.CloseLeague's callers in httpapi.
+func (s *Service) SendLeagueClosedEmail(ctx context.Context, toEmail, toDisplayName, leagueName string) error {
+	body := fmt.Sprintf(
+		"Hi %s, your commissioner has closed the league %q. No new picks or changes can be made, "+
+			"but the league and its full history are still there if you want to look back.",
+		toDisplayName, leagueName,
+	)
+	return s.emailSender.Send(ctx, EmailMessage{
+		To:      toEmail,
+		Subject: fmt.Sprintf("%s has been closed", leagueName),
+		Text:    body,
+		HTML:    "<p>" + html.EscapeString(body) + "</p>",
+	})
+}
+
+// SendLeagueInviteEmail sends a direct, synchronous transactional email
+// inviting someone (who may not have an account yet) to join a league via
+// its existing shareable invite code — backs the commissioner's bulk
+// "invite by email" action (POST .../invite/send). Bypasses the outbox/
+// preferences/dedupe machinery like SendLeagueClosedEmail: the recipient
+// has no user account yet, so there's no notification_preferences row to
+// check and no dedupe key worth tracking — a commissioner re-sending the
+// same invite twice is expected, not a bug to guard against.
+func (s *Service) SendLeagueInviteEmail(ctx context.Context, toEmail, toDisplayName, leagueName, conference string, seasonYear int32, inviteCode string) error {
+	greeting := "Hi there"
+	if toDisplayName != "" {
+		greeting = "Hi " + toDisplayName
+	}
+	joinURL := s.webBaseURL + "/leagues/join?code=" + url.QueryEscape(inviteCode)
+	text := fmt.Sprintf(
+		"%s, you've been invited to join %q (%s, %d) on Survivor League. Use invite code %s to join, or open %s.",
+		greeting, leagueName, conference, seasonYear, inviteCode, joinURL,
+	)
+	htmlBody := fmt.Sprintf(
+		"<p>%s, you've been invited to join <strong>%s</strong> (%s, %d) on Survivor League.</p>"+
+			"<p>Invite code: <strong style=\"font-size:1.2em;letter-spacing:2px\">%s</strong></p>"+
+			"<p><a href=\"%s\">Join the league</a></p>",
+		html.EscapeString(greeting), html.EscapeString(leagueName), html.EscapeString(conference), seasonYear,
+		html.EscapeString(inviteCode), html.EscapeString(joinURL),
+	)
+	return s.emailSender.Send(ctx, EmailMessage{
+		To:      toEmail,
+		Subject: fmt.Sprintf("You're invited to join %s", leagueName),
+		Text:    text,
+		HTML:    htmlBody,
+	})
 }
 
 // loadLeagueWeekEventContext resolves the membership/league/week rows

@@ -159,7 +159,7 @@ func main() {
 	// survived/mass_wipeout/buyback notifications, called directly from
 	// the real grading/buy-back pipelines, not a parallel/duplicate check.
 	pushSender := notify.NewExpoPushSender(http.DefaultClient, expoPushBaseURL, expoAccessToken)
-	notifyService := notify.NewService(queries, pool, pushSender, emailSender)
+	notifyService := notify.NewService(queries, pool, pushSender, emailSender, notify.WithWebBaseURL(webBaseURL))
 
 	leaguesService := leagues.NewService(queries, pool, leagues.WithNotifier(notifyService))
 	gradingService := grading.NewService(queries, pool, grading.WithNotifier(notifyService))

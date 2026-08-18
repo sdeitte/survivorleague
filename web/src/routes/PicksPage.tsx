@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
+import { BrandWordmark } from '../components/BrandWordmark'
 import {
   getAvailableTeams,
+  getCurrentWeek,
   getLeague,
   getMyPick,
   listWeekPicks,
@@ -43,34 +45,22 @@ export function PicksPage() {
     enabled: !!leagueQuery.data,
   })
 
-  // Default to the "current" week: the earliest week that still has at
-  // least one not-yet-kicked-off game in the league's conference. Falls
-  // back to the last week if every week has already started (season over,
-  // or a very late-season league), or the first week if no schedule data
-  // exists yet at all. This runs once (until the user picks a week
-  // themselves) via a scan across every week's available-teams — a handful
-  // of parallel requests, acceptable at this app's scale.
-  const currentWeekDetectQuery = useQuery({
-    queryKey: ['league', id, 'current-week-detect', weeksQuery.data?.map((w) => w.id).join(',')],
-    queryFn: async () => {
-      const weeks = weeksQuery.data!
-      const now = Date.now()
-      for (const week of weeks) {
-        const res = await getAvailableTeams(id!, week.id).catch(() => ({ teams: [] }))
-        if (res.teams.some((t) => new Date(t.kickoff_at).getTime() > now)) {
-          return week.id
-        }
-      }
-      return weeks.length > 0 ? weeks[weeks.length - 1].id : null
-    },
-    enabled: !!id && !!weeksQuery.data && weeksQuery.data.length > 0 && selectedWeekId === null,
+  // Default to the week that's currently occurring schedule-wise for the
+  // league's conference — one request to the server (which already knows
+  // every week's kickoff range), not a client-side scan across every
+  // week's available-teams.
+  const currentWeekQuery = useQuery({
+    queryKey: ['league', id, 'current-week'],
+    queryFn: () => getCurrentWeek(id!),
+    enabled: !!id && selectedWeekId === null,
+    retry: false, // a 404 (no schedule data yet) is an expected, terminal state, not worth retrying
   })
 
   useEffect(() => {
-    if (selectedWeekId === null && currentWeekDetectQuery.data) {
-      setSelectedWeekId(currentWeekDetectQuery.data)
+    if (selectedWeekId === null && currentWeekQuery.data) {
+      setSelectedWeekId(currentWeekQuery.data.id)
     }
-  }, [selectedWeekId, currentWeekDetectQuery.data])
+  }, [selectedWeekId, currentWeekQuery.data])
 
   const weekId = selectedWeekId ?? undefined
 
@@ -98,6 +88,14 @@ export function PicksPage() {
   const teamNameById = useMemo(() => {
     const map = new Map<string, string>()
     for (const t of availableTeamsQuery.data?.teams ?? []) map.set(t.team_id, t.team_name)
+    return map
+  }, [availableTeamsQuery.data])
+
+  const teamLogoById = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const t of availableTeamsQuery.data?.teams ?? []) {
+      if (t.team_logo_url) map.set(t.team_id, t.team_logo_url)
+    }
     return map
   }, [availableTeamsQuery.data])
 
@@ -177,40 +175,64 @@ export function PicksPage() {
   const league = leagueQuery.data
   const weeks: Week[] = weeksQuery.data ?? []
   const selectedWeek = weeks.find((w) => w.id === weekId)
+  const selectedIndex = weeks.findIndex((w) => w.id === weekId)
+  const goToOffset = (offset: number) => {
+    if (selectedIndex < 0) return
+    const next = weeks[selectedIndex + offset]
+    if (next) setSelectedWeekId(next.id)
+  }
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 p-6">
       <div className="max-w-lg mx-auto space-y-4">
+        <div className="flex justify-center text-lg">
+          <BrandWordmark size={200} />
+        </div>
+
         <Link to={`/leagues/${id}`} className="text-xs text-slate-500 underline">
           ← {league.name}
         </Link>
 
         <div>
           <h1 className="text-xl font-semibold">Picks</h1>
-          <p className="text-sm text-slate-400">
+          <p className="text-sm text-slate-500">
             {league.conference} · {league.season_year}
           </p>
         </div>
 
         {weeks.length === 0 ? (
-          <p className="text-sm text-slate-400">No schedule data yet — check back once weeks are synced.</p>
+          <p className="text-sm text-slate-500">No schedule data yet — check back once weeks are synced.</p>
         ) : (
-          <div className="flex gap-1.5 overflow-x-auto pb-1">
-            {weeks.map((week) => (
-              <button
-                key={week.id}
-                type="button"
-                onClick={() => setSelectedWeekId(week.id)}
-                className={
-                  'shrink-0 rounded-md px-3 py-1.5 text-sm border ' +
-                  (week.id === weekId
-                    ? 'bg-slate-100 text-slate-900 border-slate-100'
-                    : 'border-slate-700 text-slate-300 hover:bg-slate-800')
-                }
-              >
-                Wk {week.week_number}
-              </button>
-            ))}
+          <div className="flex items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={() => goToOffset(-1)}
+              disabled={selectedIndex <= 0}
+              aria-label="Previous week"
+              className="rounded-md border border-slate-700 px-2.5 py-1.5 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed enabled:hover:bg-slate-800"
+            >
+              ‹
+            </button>
+            <select
+              value={weekId ?? ''}
+              onChange={(e) => setSelectedWeekId(e.target.value)}
+              className="rounded-md border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm text-slate-100 text-center"
+            >
+              {weeks.map((week) => (
+                <option key={week.id} value={week.id}>
+                  Week {week.week_number}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => goToOffset(1)}
+              disabled={selectedIndex < 0 || selectedIndex >= weeks.length - 1}
+              aria-label="Next week"
+              className="rounded-md border border-slate-700 px-2.5 py-1.5 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed enabled:hover:bg-slate-800"
+            >
+              ›
+            </button>
           </div>
         )}
 
@@ -231,20 +253,27 @@ export function PicksPage() {
                       Your pick — {selectedWeek ? `Week ${selectedWeek.week_number}` : 'this week'}
                     </p>
                     {pickedTeam ? (
-                      <>
-                        <p className="text-lg font-semibold text-slate-100">{pickedTeam.team_name}</p>
-                        <p className="text-sm text-slate-300">
-                          {pickedTeam.is_home ? 'vs' : '@'} {pickedTeam.opponent_name} ·{' '}
-                          {new Date(pickedTeam.kickoff_at).toLocaleString(undefined, {
-                            weekday: 'short',
-                            month: 'short',
-                            day: 'numeric',
-                            hour: 'numeric',
-                            minute: '2-digit',
-                          })}
-                        </p>
-                        {pickedTeam.is_locked && <p className="text-xs text-slate-500 mt-1">Locked</p>}
-                      </>
+                      <div className="flex items-center gap-3">
+                        {pickedTeam.team_logo_url && (
+                          <div className="h-[72px] w-[72px] rounded-full bg-white p-2 shrink-0">
+                            <img src={pickedTeam.team_logo_url} alt="" className="h-full w-full object-contain" loading="lazy" />
+                          </div>
+                        )}
+                        <div>
+                          <p className="text-lg font-semibold text-slate-100">{pickedTeam.team_name}</p>
+                          <p className="text-sm text-slate-300">
+                            {pickedTeam.is_home ? 'vs' : '@'} {pickedTeam.opponent_name} ·{' '}
+                            {new Date(pickedTeam.kickoff_at).toLocaleString(undefined, {
+                              weekday: 'short',
+                              month: 'short',
+                              day: 'numeric',
+                              hour: 'numeric',
+                              minute: '2-digit',
+                            })}
+                          </p>
+                          {pickedTeam.is_locked && <p className="text-xs text-slate-500 mt-1">Locked</p>}
+                        </div>
+                      </div>
                     ) : (
                       <p className="text-sm text-slate-300">Saved</p>
                     )}
@@ -256,12 +285,12 @@ export function PicksPage() {
               <h2 className="p-4 text-sm font-medium text-slate-200">
                 {selectedWeek ? `Week ${selectedWeek.week_number}` : 'This week'}'s teams
               </h2>
-              {availableTeamsQuery.isLoading && <p className="p-4 text-sm text-slate-400">Loading teams…</p>}
+              {availableTeamsQuery.isLoading && <p className="p-4 text-sm text-slate-500">Loading teams…</p>}
               {availableTeamsQuery.error && (
                 <p className="p-4 text-sm text-red-400">Could not load teams for this week.</p>
               )}
               {availableTeamsQuery.data?.teams.length === 0 && (
-                <p className="p-4 text-sm text-slate-400">No {league.conference} games scheduled this week.</p>
+                <p className="p-4 text-sm text-slate-500">No {league.conference} games scheduled this week.</p>
               )}
               {availableTeamsQuery.data?.teams.map((team) => {
                 const disabled = team.is_used_elsewhere || (team.is_locked && !team.is_current_pick)
@@ -287,22 +316,29 @@ export function PicksPage() {
                           : 'hover:bg-slate-800/60')
                     }
                   >
-                    <div>
-                      <p className="text-sm font-medium text-slate-100">
-                        {team.team_name}
-                        {team.is_current_pick && <span className="ml-2 text-xs text-emerald-400">Your pick</span>}
-                      </p>
-                      <p className="text-xs text-slate-400">
-                        {team.is_home ? 'vs' : '@'} {team.opponent_name} ·{' '}
-                        {new Date(team.kickoff_at).toLocaleString(undefined, {
-                          weekday: 'short',
-                          month: 'short',
-                          day: 'numeric',
-                          hour: 'numeric',
-                          minute: '2-digit',
-                        })}
-                      </p>
-                      {reason && <p className="text-xs text-amber-500 mt-0.5">{reason}</p>}
+                    <div className="flex items-center gap-3 min-w-0">
+                      {team.team_logo_url && (
+                        <div className="h-11 w-11 rounded-full bg-white p-1.5 shrink-0">
+                          <img src={team.team_logo_url} alt="" className="h-full w-full object-contain" loading="lazy" />
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-slate-100">
+                          {team.team_name}
+                          {team.is_current_pick && <span className="ml-2 text-xs text-emerald-400">Your pick</span>}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {team.is_home ? 'vs' : '@'} {team.opponent_name} ·{' '}
+                          {new Date(team.kickoff_at).toLocaleString(undefined, {
+                            weekday: 'short',
+                            month: 'short',
+                            day: 'numeric',
+                            hour: 'numeric',
+                            minute: '2-digit',
+                          })}
+                        </p>
+                        {reason && <p className="text-xs text-amber-500 mt-0.5">{reason}</p>}
+                      </div>
                     </div>
                     {team.is_locked && <span className="text-xs text-slate-500 shrink-0 ml-2">Locked</span>}
                   </button>
@@ -313,7 +349,7 @@ export function PicksPage() {
             {(hasOwnPick || anyGameLockedThisWeek) && (
               <section className="rounded-xl border border-slate-800 bg-slate-900 divide-y divide-slate-800">
                 <h2 className="p-4 text-sm font-medium text-slate-200">League picks</h2>
-                {weekPicksQuery.isLoading && <p className="p-4 text-sm text-slate-400">Loading…</p>}
+                {weekPicksQuery.isLoading && <p className="p-4 text-sm text-slate-500">Loading…</p>}
                 {weekPicksQuery.error && (
                   <p className="p-4 text-sm text-red-400">
                     {weekPicksQuery.error instanceof ApiError
@@ -326,11 +362,21 @@ export function PicksPage() {
                     <p className="text-sm text-slate-100">{status.display_name}</p>
                     {status.has_picked ? (
                       status.team_id ? (
-                        <span className="text-xs text-emerald-400">
+                        <span className="text-xs text-emerald-400 flex items-center gap-1.5">
+                          {teamLogoById.get(status.team_id) && (
+                            <span className="h-6 w-6 rounded-full bg-white p-1 shrink-0">
+                              <img
+                                src={teamLogoById.get(status.team_id)}
+                                alt=""
+                                className="h-full w-full object-contain"
+                                loading="lazy"
+                              />
+                            </span>
+                          )}
                           {teamNameById.get(status.team_id) ?? 'Picked'}
                         </span>
                       ) : (
-                        <span className="text-xs text-slate-400">Picked (hidden until kickoff)</span>
+                        <span className="text-xs text-slate-500">Picked (hidden until kickoff)</span>
                       )
                     ) : (
                       <span className="text-xs text-slate-500">Not yet picked</span>

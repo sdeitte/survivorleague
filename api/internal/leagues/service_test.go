@@ -369,6 +369,61 @@ func TestService_UpdateCommissionerIsContestant(t *testing.T) {
 	}
 }
 
+// TestService_CloseLeague_SetsStatusAndPreservesData is the core
+// regression guard for the close-league feature's core design decision:
+// closing must NOT delete anything — the league row, its memberships, and
+// the member list must all survive untouched apart from status.
+func TestService_CloseLeague_SetsStatusAndPreservesData(t *testing.T) {
+	s, q := newTestService(t)
+	commissioner := createTestUser(t, s.queries, "commish")
+	league, commMembership := createTestLeague(t, s, commissioner)
+
+	player := createTestUser(t, q, "player")
+	if _, err := s.JoinByCode(context.Background(), league.ID, player.ID); err != nil {
+		t.Fatalf("JoinByCode: %v", err)
+	}
+
+	closed, members, err := s.CloseLeague(context.Background(), league.ID, commMembership.UserID)
+	if err != nil {
+		t.Fatalf("CloseLeague: %v", err)
+	}
+	if closed.Status != "closed" {
+		t.Errorf("closed.Status = %q, want %q", closed.Status, "closed")
+	}
+	if closed.Name != league.Name {
+		t.Error("CloseLeague must not change the league name")
+	}
+	if len(members) != 2 {
+		t.Fatalf("len(members) = %d, want 2 (commissioner + player)", len(members))
+	}
+
+	// The league row itself must still be fetchable — this is a status
+	// flip, not a delete.
+	stillThere, err := s.GetLeagueByID(context.Background(), league.ID)
+	if err != nil {
+		t.Fatalf("GetLeagueByID after close: %v", err)
+	}
+	if stillThere.Status != "closed" {
+		t.Errorf("re-fetched league.Status = %q, want %q", stillThere.Status, "closed")
+	}
+
+	// Memberships must survive untouched — closing is not a mass member
+	// removal.
+	activeMembers, err := s.ListMembers(context.Background(), league.ID)
+	if err != nil {
+		t.Fatalf("ListMembers after close: %v", err)
+	}
+	if len(activeMembers) != 2 {
+		t.Errorf("len(activeMembers) after close = %d, want 2 — closing must not remove memberships", len(activeMembers))
+	}
+
+	// Closing an already-closed league must fail cleanly, not silently
+	// no-op or corrupt state.
+	if _, _, err := s.CloseLeague(context.Background(), league.ID, commMembership.UserID); !errors.Is(err, ErrLeagueAlreadyClosed) {
+		t.Errorf("second CloseLeague error = %v, want ErrLeagueAlreadyClosed", err)
+	}
+}
+
 // TestService_ListLeaderboard_SortOrder is a Phase 5 test: active members
 // must sort ahead of eliminated ones, and among the eliminated, the one
 // eliminated LATER (survived longer) must rank higher — confirmed here by

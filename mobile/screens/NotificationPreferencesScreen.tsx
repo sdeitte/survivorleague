@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useAuth } from '../auth/AuthContext';
+import { BrandWordmark } from '../components/BrandWordmark';
 import * as api from '../api';
 import { ApiError, type NotificationPreferences } from '../api';
 
@@ -50,6 +51,10 @@ export function NotificationPreferencesScreen({ onBack }: { onBack: () => void }
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <View style={styles.brandRow}>
+        <BrandWordmark size={90} />
+      </View>
+
       <Pressable onPress={onBack}>
         <Text style={styles.backLink}>← Back</Text>
       </Pressable>
@@ -110,6 +115,10 @@ export function NotificationPreferencesScreen({ onBack }: { onBack: () => void }
 }
 
 const styles = StyleSheet.create({
+  brandRow: {
+    alignItems: 'center',
+    marginBottom: 12,
+  },
   container: {
     flex: 1,
     backgroundColor: '#0f172a',

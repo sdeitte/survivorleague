@@ -1,1 +1,35 @@
 @import "tailwindcss";
+
+@theme {
+  --font-display: "Creepster", "Nunito Sans", system-ui, sans-serif;
+  --font-sans: "Nunito Sans", system-ui, sans-serif;
+
+  --color-blood-950: #1a0303;
+  --color-blood-900: #2d0505;
+  --color-blood-800: #4a0808;
+  --color-blood-700: #6b0f0f;
+  --color-blood-600: #8f1414;
+  --color-blood-500: #b91c1c;
+  --color-blood-400: #dc2626;
+
+  --color-ember-600: #b45309;
+  --color-ember-500: #d97706;
+  --color-ember-400: #f59e0b;
+  --color-ember-300: #fbbf24;
+}
+
+/* The "Survivor" wordmark look: Creepster's own drippy glyphs do most of
+   the work; a dark offset shadow + a subtle red glow underneath is what
+   sells the carved-torch/blood-torch depth on top of that. Applied via
+   the .title-scary utility class rather than baked into every heading,
+   so normal UI text (buttons, labels, body copy) stays legible. */
+.title-scary {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: 0.03em;
+  color: var(--color-blood-500);
+  text-shadow:
+    0 2px 0 #000,
+    0 4px 6px rgba(0, 0, 0, 0.6),
+    0 0 18px rgba(185, 28, 28, 0.45);
+}
