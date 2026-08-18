@@ -1,10 +1,10 @@
-# DigitalOcean App Platform spec — Phase 0 scaffolding only.
+# DigitalOcean App Platform spec.
 #
 # This is a CONFIG FILE, not a deployment action. No `doctl` command has
-# been run against it and no real DO resources exist yet. Real deploy
-# happens later per the plan's roadmap (Phase 0 roadmap item: "a real
-# end-to-end DO deploy of hello world before feature work starts" — that
-# step is still pending manual/CLI execution outside this scaffold).
+# been run against it and no real DO resources exist yet — see
+# infra/LAUNCH_CHECKLIST.md and the deployment plan for the actual
+# sequencing (Postgres provisioned + migrated *before* the first
+# `doctl apps create` against this spec).
 #
 # Postgres is NOT declared here — per the plan's Hosting section, it's
 # provisioned separately as a DO Managed PostgreSQL database resource
@@ -23,16 +23,31 @@ region: nyc
 services:
   - name: api
     github:
-      repo: sdeitte/survivor-league # placeholder — update once a remote exists
+      repo: sdeitte/survivorleague
       branch: main
       deploy_on_push: true
     source_dir: api
-    dockerfile_path: api/Dockerfile # placeholder — add a Dockerfile when Phase 0's DO deploy step is executed
+    # Relative to source_dir (confirmed empirically — App Platform's build
+    # logs showed it resolving this against the already-`api`-scoped
+    # workspace root, so `api/Dockerfile` here 404'd looking for the
+    # nonexistent api/api/Dockerfile).
+    dockerfile_path: Dockerfile
     http_port: 8080
     instance_count: 1
     instance_size_slug: apps-s-1vcpu-0.5gb
+    # Mounted at /api on the app's shared default domain (App Platform
+    # strips this prefix before forwarding to the container by default, so
+    # the Go router's own routes stay unprefixed — e.g. a request to
+    # /api/health reaches this service as /health). Two components can't
+    # both claim path "/" under one app's default ingress, which is what
+    # this originally did before being caught by `doctl apps spec
+    # validate`. Bonus: since web and api now share one domain (just
+    # different paths), API calls from the web app are same-origin, not
+    # cross-origin — simpler and more reliable than the two-separate-
+    # hostnames shape this originally implied, especially for the
+    # Secure/credentialed refresh-token cookie.
     routes:
-      - path: /
+      - path: /api
     health_check:
       http_path: /health
       initial_delay_seconds: 10
@@ -56,11 +71,20 @@ services:
       - key: CFBD_API_KEY
         value: ${CFBD_API_KEY}
         type: SECRET
+      - key: RESEND_API_KEY
+        value: ${RESEND_API_KEY}
+        type: SECRET
+      - key: RESEND_FROM_EMAIL
+        value: ${RESEND_FROM_EMAIL}
+        type: SECRET
+      - key: EXPO_ACCESS_TOKEN
+        value: ${EXPO_ACCESS_TOKEN}
+        type: SECRET
 
 static_sites:
   - name: web
     github:
-      repo: sdeitte/survivor-league # placeholder — update once a remote exists
+      repo: sdeitte/survivorleague
       branch: main
       deploy_on_push: true
     source_dir: web
