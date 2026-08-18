@@ -183,21 +183,27 @@ func main() {
 		CORSAllowedOrigin: corsAllowedOrigin,
 	})
 
-	// --- Daily schedule-sync cron (additive to the manual admin endpoint) ---
+	// --- Twice-daily schedule-sync cron (additive to the manual admin endpoint) ---
 	//
-	// Runs at 6:00 AM America/New_York — off-peak, well after any
-	// late-night games have finished and their final scores/statuses have
-	// settled, and before most users start checking picks for the day.
-	// Falls back to UTC if the timezone database isn't available in the
-	// runtime environment (rare, but cleaner than crashing the whole
-	// server startup over the scheduler's timezone).
+	// Runs at 6:00 AM and 6:00 PM America/New_York. The original single
+	// 6 AM run was off-peak (well after any late-night games have finished
+	// and settled, before most users check picks for the day), but a
+	// once-a-day sync left up to ~24h of staleness against TV networks
+	// flexing a game's kickoff time — those announcements are typically
+	// made with at least 24h notice, so a single daily sync could in the
+	// worst case only catch a flex change the same day it airs, right at
+	// the edge of (or past) when the old kickoff_at would have already
+	// locked picks. The 12h cadence halves that worst case. Falls back to
+	// UTC if the timezone database isn't available in the runtime
+	// environment (rare, but cleaner than crashing the whole server
+	// startup over the scheduler's timezone).
 	loc, err := time.LoadLocation("America/New_York")
 	if err != nil {
 		log.Printf("warning: could not load America/New_York timezone (%v) — cron will run on UTC instead", err)
 		loc = time.UTC
 	}
 	cronScheduler := cron.New(cron.WithLocation(loc))
-	_, err = cronScheduler.AddFunc("0 6 * * *", func() {
+	_, err = cronScheduler.AddFunc("0 6,18 * * *", func() {
 		year := currentSeasonYear(time.Now())
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()

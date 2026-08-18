@@ -60,7 +60,7 @@ const targetLeagueID = "e3946a77-55e1-47a2-b010-7790e60df212"
 // simulatedWeeks is how many weeks of the season to generate picks/results
 // for. Leaves the remaining weeks of the real 14-week season untouched and
 // open for genuine manual testing.
-const simulatedWeeks = 8
+const simulatedWeeks = 5
 
 // winProbability is each at-risk player's chance of surviving a given
 // week's pick, per game (games are decided once, not per-player — see

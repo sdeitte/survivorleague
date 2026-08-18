@@ -36,7 +36,7 @@ const (
 // dedupe key does that work, not this scan's own logic.
 //
 // Wired into cmd/server/main.go's cron scheduler on an hourly schedule,
-// alongside the Phase 3 daily schedule-sync cron.
+// alongside the Phase 3 twice-daily schedule-sync cron.
 func (s *Service) ScanPickReminders(ctx context.Context) error {
 	candidates, err := s.queries.ListActiveContestantMembershipsForReminderScan(ctx)
 	if err != nil {
