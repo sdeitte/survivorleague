@@ -100,7 +100,12 @@ func (s *Service) RequestPasswordReset(ctx context.Context, email string) error 
 		To:      user.Email,
 		Subject: "Reset your Survivor League password",
 		Text:    text,
-		HTML:    "<p>" + html.EscapeString(text) + "</p>",
+		HTML: fmt.Sprintf(
+			"<p>We received a request to reset your Survivor League password.</p>"+
+				"<p><a href=\"%s\">Reset your password</a> (link expires in 1 hour)</p>"+
+				"<p>If you didn't request this, you can safely ignore this email.</p>",
+			html.EscapeString(link),
+		),
 	})
 
 	return nil
@@ -253,7 +258,10 @@ func (s *Service) issueEmailVerificationToken(ctx context.Context, userID pgtype
 		To:      email,
 		Subject: "Verify your Survivor League email",
 		Text:    text,
-		HTML:    "<p>" + html.EscapeString(text) + "</p>",
+		HTML: fmt.Sprintf(
+			"<p>Welcome to Survivor League! <a href=\"%s\">Verify your email address</a> (link expires in 24 hours).</p>",
+			html.EscapeString(link),
+		),
 	})
 
 	return nil

@@ -68,6 +68,13 @@ services:
         type: SECRET
       - key: CORS_ALLOWED_ORIGIN
         value: ${web.PUBLIC_URL}
+      # Frontend origin used to build password-reset/email-verification/
+      # league-invite links (see api/cmd/server/main.go's WEB_BASE_URL
+      # handling). Defaults to http://localhost:5173 if unset — must be
+      # the real custom domain, not web.PUBLIC_URL's *.ondigitalocean.app
+      # value, since that's what recipients actually click.
+      - key: WEB_BASE_URL
+        value: https://survivorleague.football
       - key: CFBD_API_KEY
         value: ${CFBD_API_KEY}
         type: SECRET
@@ -90,6 +97,12 @@ static_sites:
     source_dir: web
     build_command: npm ci && npm run build
     output_dir: dist
+    # Without this, direct navigation to a client-side route (e.g. the
+    # /verify-email?token=... link from a real email, not a link clicked
+    # from within the already-loaded app) 404s: App Platform's static file
+    # server has no literal /verify-email file to serve, and by default
+    # returns a real 404 instead of falling back to the SPA's index.html.
+    catchall_document: index.html
     routes:
       - path: /
     envs:
