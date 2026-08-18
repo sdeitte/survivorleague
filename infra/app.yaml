@@ -27,11 +27,11 @@ services:
       branch: main
       deploy_on_push: true
     source_dir: api
-    # Relative to source_dir (confirmed empirically — App Platform's build
-    # logs showed it resolving this against the already-`api`-scoped
-    # workspace root, so `api/Dockerfile` here 404'd looking for the
-    # nonexistent api/api/Dockerfile).
-    dockerfile_path: Dockerfile
+    # Relative to the REPO ROOT, not source_dir (confirmed empirically —
+    # an earlier attempt to "fix" this to a source_dir-relative path was
+    # itself a misdiagnosis: the actual failure at the time was that
+    # api/Dockerfile hadn't been pushed to GitHub yet, not a wrong path).
+    dockerfile_path: api/Dockerfile
     http_port: 8080
     instance_count: 1
     instance_size_slug: apps-s-1vcpu-0.5gb
