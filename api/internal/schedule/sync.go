@@ -40,6 +40,15 @@ var _ cfbdClient = (*CFBDClient)(nil)
 // occurrence is confirmed and added here by hand.
 var excludedGameExternalIDs = map[string]string{
 	"401864494": "USC vs San José State (2026-08-29) — CFBD tags this Big Ten week 1, same as USC's real week 1 game (Fresno State, 2026-09-04); not a legitimate second week-1 choice",
+	// The remaining four were found by auditing every conference for the
+	// same signature (a team with more than one game in the same
+	// season_year/week_number) after the USC case above was reported —
+	// same root cause, a standalone late-August opener CFBD tags with the
+	// same week_number as that team's real week 1 game 6-9 days later.
+	"401864570": "Florida State vs New Mexico State (2026-08-29) — ACC/Conference USA week 1, same as Florida State's real week 1 game (SMU, 2026-09-07)",
+	"401858201": "Stanford vs Hawai'i (2026-08-29) — ACC/Mountain West week 1; Stanford's real week 1 game is Miami (2026-09-05), Hawai'i's is UNLV (2026-09-06)",
+	"401862693": "UNLV vs Memphis (2026-08-30) — Mountain West/American Athletic week 1; Memphis's real week 1 game is Arkansas State (2026-09-05), UNLV's is Hawai'i (2026-09-06)",
+	"401866408": "Eastern Michigan vs Sacramento State (2026-08-29) — Mid-American week 1, same as Eastern Michigan's real week 1 game (San José State, 2026-09-04)",
 }
 
 // SkippedGame records a CFBD game this sync could not upsert, and why.
