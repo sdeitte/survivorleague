@@ -24,9 +24,23 @@ var ErrGameNotFound = errors.New("schedule: game not found")
 var ErrGameNotFoundInCFBD = errors.New("schedule: game not found in CFBD response for its week")
 
 // ListWeeksBySeasonYear lists a season's weeks, ordered by week_number.
-// Backs GET /weeks?season_year=.
+// Backs GET /weeks?season_year= (no conference given — used by admin
+// tooling that intentionally wants every week regardless of conference).
 func (s *Service) ListWeeksBySeasonYear(ctx context.Context, seasonYear int32) ([]gen.Week, error) {
 	return s.queries.ListWeeksBySeasonYear(ctx, seasonYear)
+}
+
+// ListWeeksBySeasonYearAndConference lists a season's weeks restricted to
+// ones with at least one game in conference, ordered by week_number. Backs
+// GET /weeks?season_year=&conference= — the per-league picks screen must
+// never offer a week that's a no-op for that league's conference (e.g. a
+// standalone late-December game like Army-Navy shows up as its own global
+// week that every other conference's season has already finished before).
+func (s *Service) ListWeeksBySeasonYearAndConference(ctx context.Context, seasonYear int32, conference string) ([]gen.Week, error) {
+	return s.queries.ListWeeksBySeasonYearAndConference(ctx, gen.ListWeeksBySeasonYearAndConferenceParams{
+		SeasonYear: seasonYear,
+		Conference: conference,
+	})
 }
 
 // GetWeekByID looks up a week by id, mapping "no rows" to ErrWeekNotFound.

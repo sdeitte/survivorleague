@@ -207,6 +207,50 @@ func (q *Queries) ListWeeksBySeasonYear(ctx context.Context, seasonYear int32) (
 	return items, nil
 }
 
+const listWeeksBySeasonYearAndConference = `-- name: ListWeeksBySeasonYearAndConference :many
+SELECT DISTINCT w.id, w.season_year, w.week_number, w.created_at, w.updated_at FROM weeks w
+JOIN games g ON g.week_id = w.id
+JOIN teams t ON (t.id = g.home_team_id OR t.id = g.away_team_id) AND t.conference = $1
+WHERE w.season_year = $2
+ORDER BY w.week_number ASC
+`
+
+type ListWeeksBySeasonYearAndConferenceParams struct {
+	Conference string `json:"conference"`
+	SeasonYear int32  `json:"season_year"`
+}
+
+// Same as ListWeeksBySeasonYear but restricted to weeks that have at least
+// one game involving conference — weeks are global/shared across every
+// conference (see ListWeekKickoffRangesForConference), so a week with only
+// e.g. an Army-Navy game (American Athletic) would otherwise show up as a
+// selectable-but-empty week for every other conference's leagues too.
+func (q *Queries) ListWeeksBySeasonYearAndConference(ctx context.Context, arg ListWeeksBySeasonYearAndConferenceParams) ([]Week, error) {
+	rows, err := q.db.Query(ctx, listWeeksBySeasonYearAndConference, arg.Conference, arg.SeasonYear)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Week{}
+	for rows.Next() {
+		var i Week
+		if err := rows.Scan(
+			&i.ID,
+			&i.SeasonYear,
+			&i.WeekNumber,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upsertWeek = `-- name: UpsertWeek :one
 INSERT INTO weeks (season_year, week_number)
 VALUES ($1, $2)

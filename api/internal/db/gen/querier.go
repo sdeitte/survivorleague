@@ -332,6 +332,12 @@ type Querier interface {
 	// per-week ranges in week order.
 	ListWeekKickoffRangesForConference(ctx context.Context, arg ListWeekKickoffRangesForConferenceParams) ([]ListWeekKickoffRangesForConferenceRow, error)
 	ListWeeksBySeasonYear(ctx context.Context, seasonYear int32) ([]Week, error)
+	// Same as ListWeeksBySeasonYear but restricted to weeks that have at least
+	// one game involving conference — weeks are global/shared across every
+	// conference (see ListWeekKickoffRangesForConference), so a week with only
+	// e.g. an Army-Navy game (American Athletic) would otherwise show up as a
+	// selectable-but-empty week for every other conference's leagues too.
+	ListWeeksBySeasonYearAndConference(ctx context.Context, arg ListWeeksBySeasonYearAndConferenceParams) ([]Week, error)
 	// Conditioned on used_at IS NULL so a concurrent replay of the same token
 	// loses the race cleanly (RETURNING zero rows -> pgx.ErrNoRows), same
 	// pattern as MarkPasswordResetTokenUsed.

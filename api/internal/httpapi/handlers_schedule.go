@@ -10,10 +10,16 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/sdeitte/survivor-league-api/internal/db"
+	"github.com/sdeitte/survivor-league-api/internal/db/gen"
 	"github.com/sdeitte/survivor-league-api/internal/schedule"
 )
 
-// handleListWeeks implements GET /weeks?season_year= (requireAuth).
+// handleListWeeks implements GET /weeks?season_year=&conference=
+// (requireAuth). conference is optional: omitting it (as admin tooling
+// does) lists every week in the season regardless of conference; a
+// league's picks screen must always pass its own conference, or it'll be
+// offered weeks that are a no-op for it — see
+// Service.ListWeeksBySeasonYearAndConference's doc comment.
 func (a *API) handleListWeeks(w http.ResponseWriter, r *http.Request) {
 	raw := r.URL.Query().Get("season_year")
 	if raw == "" {
@@ -25,8 +31,14 @@ func (a *API) handleListWeeks(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "season_year must be an integer")
 		return
 	}
+	conference := r.URL.Query().Get("conference")
 
-	weeks, err := a.scheduleService.ListWeeksBySeasonYear(r.Context(), int32(seasonYear))
+	var weeks []gen.Week
+	if conference != "" {
+		weeks, err = a.scheduleService.ListWeeksBySeasonYearAndConference(r.Context(), int32(seasonYear), conference)
+	} else {
+		weeks, err = a.scheduleService.ListWeeksBySeasonYear(r.Context(), int32(seasonYear))
+	}
 	if err != nil {
 		log.Printf("list weeks: %v", err)
 		writeError(w, http.StatusInternalServerError, "failed to list weeks")

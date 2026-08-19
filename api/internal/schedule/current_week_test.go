@@ -148,3 +148,51 @@ func TestService_CurrentWeek(t *testing.T) {
 		}
 	})
 }
+
+// TestService_ListWeeksBySeasonYearAndConference guards against the
+// production bug where a week that's a no-op for a league's conference
+// (e.g. a standalone Army-Navy game occupying its own global week number
+// after every other conference's season has ended) showed up as a
+// selectable-but-empty week on that league's picks screen — weeks are
+// global/shared across conferences, so listing "the season's weeks" without
+// filtering by conference always leaked this.
+func TestService_ListWeeksBySeasonYearAndConference(t *testing.T) {
+	q := newTestQueries(t)
+	svc := NewService(q, nil)
+	year := int32(uniqueSeasonYear())
+	base := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+
+	bigTenA := createCWTestTeam(t, q, "LW Big Ten A", "Big Ten")
+	bigTenB := createCWTestTeam(t, q, "LW Big Ten B", "Big Ten")
+	week1 := createCWTestWeek(t, q, year, 1)
+	createCWTestGame(t, q, week1, bigTenA, bigTenB, base)
+	week2 := createCWTestWeek(t, q, year, 2)
+	createCWTestGame(t, q, week2, bigTenA, bigTenB, base.Add(7*24*time.Hour))
+
+	// A standalone week, in the same season, with only an AAC game —
+	// mirrors the real Army-Navy case: a real global week row that has no
+	// bearing on a Big Ten league.
+	aacA := createCWTestTeam(t, q, "LW AAC A", "American Athletic Conference")
+	aacB := createCWTestTeam(t, q, "LW AAC B", "American Athletic Conference")
+	week15 := createCWTestWeek(t, q, year, 15)
+	createCWTestGame(t, q, week15, aacA, aacB, base.Add(90*24*time.Hour))
+
+	weeks, err := svc.ListWeeksBySeasonYearAndConference(context.Background(), year, "Big Ten")
+	if err != nil {
+		t.Fatalf("ListWeeksBySeasonYearAndConference: %v", err)
+	}
+	if len(weeks) != 2 {
+		t.Fatalf("got %d weeks, want 2 (week15's AAC-only game must not appear for Big Ten)", len(weeks))
+	}
+	if weeks[0].WeekNumber != week1.WeekNumber || weeks[1].WeekNumber != week2.WeekNumber {
+		t.Errorf("weeks = %d, %d; want %d, %d in order", weeks[0].WeekNumber, weeks[1].WeekNumber, week1.WeekNumber, week2.WeekNumber)
+	}
+
+	aacWeeks, err := svc.ListWeeksBySeasonYearAndConference(context.Background(), year, "American Athletic Conference")
+	if err != nil {
+		t.Fatalf("ListWeeksBySeasonYearAndConference: %v", err)
+	}
+	if len(aacWeeks) != 1 || aacWeeks[0].WeekNumber != week15.WeekNumber {
+		t.Fatalf("AAC weeks = %+v, want exactly week %d", aacWeeks, week15.WeekNumber)
+	}
+}

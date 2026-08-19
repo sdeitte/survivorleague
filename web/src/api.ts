@@ -513,8 +513,16 @@ export async function joinLeagueByCode(code: string): Promise<League> {
 
 // --- Schedule / Picks (Phase 4) ---
 
-export async function listWeeks(seasonYear: number): Promise<Week[]> {
-  return apiFetch<Week[]>(`/weeks?season_year=${seasonYear}`)
+// conference is optional: pass a league's conference so weeks that are a
+// no-op for it (e.g. a standalone late-season game in another conference,
+// which still occupies its own global week row) never show up as
+// selectable-but-empty. Admin tooling omits it deliberately to see every
+// week regardless of conference.
+export async function listWeeks(seasonYear: number, conference?: string): Promise<Week[]> {
+  const query = conference
+    ? `season_year=${seasonYear}&conference=${encodeURIComponent(conference)}`
+    : `season_year=${seasonYear}`
+  return apiFetch<Week[]>(`/weeks?${query}`)
 }
 
 // getCurrentWeek backs the picks screen's default week selection: the

@@ -12,6 +12,18 @@ RETURNING *;
 -- name: ListWeeksBySeasonYear :many
 SELECT * FROM weeks WHERE season_year = sqlc.arg(season_year) ORDER BY week_number ASC;
 
+-- name: ListWeeksBySeasonYearAndConference :many
+-- Same as ListWeeksBySeasonYear but restricted to weeks that have at least
+-- one game involving conference — weeks are global/shared across every
+-- conference (see ListWeekKickoffRangesForConference), so a week with only
+-- e.g. an Army-Navy game (American Athletic) would otherwise show up as a
+-- selectable-but-empty week for every other conference's leagues too.
+SELECT DISTINCT w.* FROM weeks w
+JOIN games g ON g.week_id = w.id
+JOIN teams t ON (t.id = g.home_team_id OR t.id = g.away_team_id) AND t.conference = sqlc.arg(conference)
+WHERE w.season_year = sqlc.arg(season_year)
+ORDER BY w.week_number ASC;
+
 -- name: GetWeekByID :one
 SELECT * FROM weeks WHERE id = sqlc.arg(id);
 

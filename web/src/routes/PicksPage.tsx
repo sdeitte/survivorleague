@@ -40,8 +40,8 @@ export function PicksPage() {
   })
 
   const weeksQuery = useQuery({
-    queryKey: ['weeks', leagueQuery.data?.season_year],
-    queryFn: () => listWeeks(leagueQuery.data!.season_year),
+    queryKey: ['weeks', leagueQuery.data?.season_year, leagueQuery.data?.conference],
+    queryFn: () => listWeeks(leagueQuery.data!.season_year, leagueQuery.data!.conference),
     enabled: !!leagueQuery.data,
   })
 
