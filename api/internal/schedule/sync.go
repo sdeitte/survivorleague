@@ -25,6 +25,23 @@ type cfbdClient interface {
 
 var _ cfbdClient = (*CFBDClient)(nil)
 
+// excludedGameExternalIDs lists real CFBD games (keyed by CFBD's external
+// game id, fmt.Sprint(g.ID)) that must never be synced/pickable despite
+// being legitimate scheduled games. CFBD's calendar assigns these the same
+// week_number as that team's real week-1 slate even though they're played
+// nearly a week earlier as a standalone season-opener — e.g. USC played San
+// José State on 2026-08-29, then Fresno State on 2026-09-04 as its real
+// Big Ten week 1 game, both tagged week=1. Letting both through would
+// present two "week 1" choices for the same team, or effectively strand
+// the early one as a single-game week for its conference. There's no
+// general signal in CFBD's data to detect this automatically (it's not
+// "earliest game of the week" — plenty of weeks legitimately open with a
+// Thursday game a day or two ahead of the Saturday cluster); each
+// occurrence is confirmed and added here by hand.
+var excludedGameExternalIDs = map[string]string{
+	"401864494": "USC vs San José State (2026-08-29) — CFBD tags this Big Ten week 1, same as USC's real week 1 game (Fresno State, 2026-09-04); not a legitimate second week-1 choice",
+}
+
 // SkippedGame records a CFBD game this sync could not upsert, and why.
 type SkippedGame struct {
 	ExternalID string `json:"external_id"`
@@ -165,6 +182,12 @@ func (s *Service) SyncSeason(ctx context.Context, year int) (SyncResult, error) 
 
 	for _, g := range games {
 		externalID := fmt.Sprint(g.ID)
+
+		if reason, excluded := excludedGameExternalIDs[externalID]; excluded {
+			result.SkippedGames = append(result.SkippedGames, SkippedGame{ExternalID: externalID, Reason: reason})
+			result.GamesSkipped++
+			continue
+		}
 
 		homeTeamID, homeOK := teamIDByExternalID[fmt.Sprint(g.HomeID)]
 		awayTeamID, awayOK := teamIDByExternalID[fmt.Sprint(g.AwayID)]
@@ -331,6 +354,12 @@ func (s *Service) RefreshWeek(ctx context.Context, seasonYear, weekNumber int) (
 
 	for _, g := range games {
 		externalID := fmt.Sprint(g.ID)
+
+		if reason, excluded := excludedGameExternalIDs[externalID]; excluded {
+			result.SkippedGames = append(result.SkippedGames, SkippedGame{ExternalID: externalID, Reason: reason})
+			result.GamesSkipped++
+			continue
+		}
 
 		homeTeam, err := s.queries.GetTeamByExternalID(ctx, fmt.Sprint(g.HomeID))
 		if err != nil {

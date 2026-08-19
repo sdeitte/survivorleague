@@ -423,6 +423,47 @@ func TestService_SyncSeason_GameWithUnparseableStartDate(t *testing.T) {
 	}
 }
 
+// TestService_SyncSeason_ExcludesKnownBadGames guards the
+// excludedGameExternalIDs denylist: a game on that list is skipped (not
+// upserted) even though it's otherwise perfectly valid CFBD data, while an
+// unrelated game in the same response still syncs normally.
+func TestService_SyncSeason_ExcludesKnownBadGames(t *testing.T) {
+	q := newTestQueries(t)
+	year := uniqueSeasonYear()
+
+	gamesJSON := `[
+    {
+      "id": 401864494, "season": 2025, "week": 1, "seasonType": "regular",
+      "startDate": "2026-08-29T19:00:00.000Z", "startTimeTBD": false, "completed": false,
+      "homeId": 1, "homeTeam": "Ohio State", "homePoints": null,
+      "awayId": 2, "awayTeam": "Michigan", "awayPoints": null
+    },
+    {
+      "id": 999999, "season": 2025, "week": 1, "seasonType": "regular",
+      "startDate": "2026-09-05T00:00:00.000Z", "startTimeTBD": false, "completed": false,
+      "homeId": 1, "homeTeam": "Ohio State", "homePoints": null,
+      "awayId": 2, "awayTeam": "Michigan", "awayPoints": null
+    }
+  ]`
+
+	fixture := newMutableFixtureServer(t, fixtureTeamsJSON, fixtureCalendarJSON, gamesJSON)
+	svc := fixture.service(t, q)
+
+	result, err := svc.SyncSeason(context.Background(), year)
+	if err != nil {
+		t.Fatalf("SyncSeason: %v", err)
+	}
+	if result.GamesUpserted != 1 {
+		t.Errorf("GamesUpserted = %d, want 1 (only the non-excluded game)", result.GamesUpserted)
+	}
+	if result.GamesSkipped != 1 {
+		t.Errorf("GamesSkipped = %d, want 1 (the excluded game)", result.GamesSkipped)
+	}
+	if len(result.SkippedGames) != 1 || result.SkippedGames[0].ExternalID != "401864494" {
+		t.Errorf("SkippedGames = %+v, want a single entry for external_id 401864494", result.SkippedGames)
+	}
+}
+
 // TestNormalizeConference_UnmappedNameIsSurfacedNotDropped exercises the
 // normalization table's fallback path directly (no DB/HTTP needed): a raw
 // CFBD conference string with no table entry is still stored (never
