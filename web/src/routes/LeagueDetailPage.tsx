@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import * as Dialog from '@radix-ui/react-dialog'
 import { BrandWordmark } from '../components/BrandWordmark'
+import { LeaderboardList } from '../components/LeaderboardList'
 import { getConferenceLogoUrl } from '../leagues/conferenceLogos'
 import {
   buyBackMember,
@@ -349,50 +350,49 @@ export function LeagueDetailPage() {
 
         {actionError && <p className="text-red-400 text-sm">{actionError}</p>}
 
-        <div className="rounded-xl border border-slate-800 bg-slate-900 divide-y divide-slate-800">
-          <h2 className="p-4 text-sm font-medium text-slate-200">Members</h2>
-          {membersQuery.isLoading && <p className="p-4 text-sm text-slate-500">Loading members…</p>}
+        <div className="space-y-2">
+          <h2 className="text-sm font-medium text-slate-200">Leaderboard</h2>
+          {membersQuery.isLoading && <p className="text-sm text-slate-500">Loading standings…</p>}
           {membersQuery.error && (
-            <p className="p-4 text-sm text-red-400">
-              {membersQuery.error instanceof ApiError ? membersQuery.error.message : 'Could not load members.'}
+            <p className="text-sm text-red-400">
+              {membersQuery.error instanceof ApiError ? membersQuery.error.message : 'Could not load the leaderboard.'}
             </p>
           )}
-          {membersQuery.data?.map((member) => (
-            <div key={member.membership_id} className="flex items-center justify-between p-4">
-              <div>
-                <p className="text-sm text-slate-100">{member.display_name}</p>
-                <p className="text-xs text-slate-500">
-                  {member.role}
-                  {!member.is_contestant && ' · not playing'}
-                  {member.status === 'eliminated' && ' · eliminated'}
-                </p>
-              </div>
-              <div className="flex items-center gap-3">
-                {isCommissioner && !isClosed && member.status === 'eliminated' && (
-                  member.bought_back ? (
-                    <span className="text-xs text-slate-500">Buy-back already used</span>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setMemberToBuyBack(member)}
-                      className="text-xs text-emerald-400 underline"
-                    >
-                      Buy back
-                    </button>
-                  )
-                )}
-                {isCommissioner && !isClosed && member.role !== 'commissioner' && (
-                  <button
-                    type="button"
-                    onClick={() => setMemberToRemove(member)}
-                    className="text-xs text-red-400 underline"
-                  >
-                    Remove
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
+          {membersQuery.data && (
+            <LeaderboardList
+              leagueId={id!}
+              entries={membersQuery.data}
+              renderActions={
+                isCommissioner && !isClosed
+                  ? (member) => (
+                      <>
+                        {member.status === 'eliminated' &&
+                          (member.bought_back ? (
+                            <span className="text-xs text-slate-500">Buy-back already used</span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setMemberToBuyBack(member)}
+                              className="text-xs text-emerald-400 underline"
+                            >
+                              Buy back
+                            </button>
+                          ))}
+                        {member.role !== 'commissioner' && (
+                          <button
+                            type="button"
+                            onClick={() => setMemberToRemove(member)}
+                            className="text-xs text-red-400 underline"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </>
+                    )
+                  : undefined
+              }
+            />
+          )}
         </div>
 
         {isCommissioner && !isClosed && (
