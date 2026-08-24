@@ -2,7 +2,15 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
 import { BrandWordmark } from '../components/BrandWordmark'
-import { getLeaderboard, getLeague, listMembershipPicks, ApiError, type LeaderboardEntry, type MembershipWeekPick } from '../api'
+import {
+  getLatestRecap,
+  getLeaderboard,
+  getLeague,
+  listMembershipPicks,
+  ApiError,
+  type LeaderboardEntry,
+  type MembershipWeekPick,
+} from '../api'
 
 // The leaderboard screen — a sorted list with status badges, each row
 // expandable into that member's full-season pick history. Sorting itself
@@ -27,6 +35,16 @@ export function LeaderboardPage() {
     // per the plan's polling-based real-time architecture.
     refetchInterval: 60_000,
   })
+  const recapQuery = useQuery({
+    queryKey: ['league', id, 'recap'],
+    queryFn: () => getLatestRecap(id!),
+    enabled: !!id,
+    // A 404 (no week has finalized yet — a brand-new league) is an
+    // expected, terminal state, not worth retrying, same treatment
+    // PicksPage gives GET current-week's identical 404 case.
+    retry: false,
+  })
+  const noRecapYet = recapQuery.error instanceof ApiError && recapQuery.error.status === 404
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 p-6">
@@ -40,6 +58,13 @@ export function LeaderboardPage() {
         </Link>
 
         <h1 className="text-xl font-semibold">Leaderboard</h1>
+
+        {recapQuery.data && !noRecapYet && (
+          <section className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-2">
+            <h2 className="text-sm font-medium text-slate-200">This week's recap</h2>
+            <p className="text-sm text-slate-300 whitespace-pre-line">{recapQuery.data.body}</p>
+          </section>
+        )}
 
         {leaderboardQuery.isLoading && <p className="text-sm text-slate-500">Loading standings…</p>}
         {leaderboardQuery.error && (

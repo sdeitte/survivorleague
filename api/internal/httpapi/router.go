@@ -14,6 +14,7 @@ import (
 	"github.com/sdeitte/survivor-league-api/internal/leagues"
 	"github.com/sdeitte/survivor-league-api/internal/notify"
 	"github.com/sdeitte/survivor-league-api/internal/picks"
+	"github.com/sdeitte/survivor-league-api/internal/recap"
 	"github.com/sdeitte/survivor-league-api/internal/schedule"
 )
 
@@ -26,6 +27,7 @@ type Deps struct {
 	AdminService      *admin.Service
 	PicksService      *picks.Service
 	NotifyService     *notify.Service
+	RecapService      *recap.Service
 	JWT               *auth.JWTIssuer
 	AppEnv            string // "development" | "production" — gates cookie Secure flag
 	CORSAllowedOrigin string
@@ -40,6 +42,7 @@ type API struct {
 	adminService    *admin.Service
 	picksService    *picks.Service
 	notifyService   *notify.Service
+	recapService    *recap.Service
 	jwt             *auth.JWTIssuer
 	appEnv          string
 }
@@ -57,6 +60,7 @@ func NewRouter(d Deps) http.Handler {
 		adminService:    d.AdminService,
 		picksService:    d.PicksService,
 		notifyService:   d.NotifyService,
+		recapService:    d.RecapService,
 		jwt:             d.JWT,
 		appEnv:          d.AppEnv,
 	}
@@ -116,6 +120,7 @@ func NewRouter(d Deps) http.Handler {
 		r.With(a.RequireLeagueMember).Get("/members", a.handleListMembers)
 		r.With(a.RequireLeagueMember).Get("/members/{membershipId}/picks", a.handleListMembershipPicks)
 		r.With(a.RequireLeagueMember).Get("/leaderboard", a.handleGetLeaderboard)
+		r.With(a.RequireLeagueMember).Get("/recap", a.handleGetLatestRecap)
 		r.With(a.RequireLeagueMember).Get("/current-week", a.handleGetCurrentWeek)
 		r.With(a.RequireCommissioner, a.RequireLeagueOpen).Delete("/members/{membershipId}", a.handleRemoveMember)
 		r.With(a.RequireCommissioner, a.RequireLeagueOpen).Post("/members/{membershipId}/buyback", a.handleBuyBackMember)

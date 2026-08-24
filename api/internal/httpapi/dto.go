@@ -238,6 +238,15 @@ func toLeaderboardEntryResponse(row gen.ListLeaderboardForLeagueRow) leaderboard
 	}
 }
 
+// weekRecapResponse is GET /leagues/:id/recap's body — the most recently
+// generated AI weekly recap (see internal/recap.Service). Plain text
+// (body), not markdown/HTML — see recap.buildPrompt's instruction to the
+// model.
+type weekRecapResponse struct {
+	Body        string `json:"body"`
+	GeneratedAt string `json:"generated_at"`
+}
+
 type inviteCodeResponse struct {
 	InviteCode string `json:"invite_code"`
 	// Joinable mirrors invitePreviewResponse's field of the same name — see
@@ -531,6 +540,7 @@ type notificationPreferencesResponse struct {
 	Survived     bool `json:"survived"`
 	MassWipeout  bool `json:"mass_wipeout"`
 	Buyback      bool `json:"buyback"`
+	WeeklyRecap  bool `json:"weekly_recap"`
 	EmailEnabled bool `json:"email_enabled"`
 	PushEnabled  bool `json:"push_enabled"`
 }
@@ -542,6 +552,7 @@ func toNotificationPreferencesResponse(p gen.NotificationPreference) notificatio
 		Survived:     p.Survived,
 		MassWipeout:  p.MassWipeout,
 		Buyback:      p.Buyback,
+		WeeklyRecap:  p.WeeklyRecap,
 		EmailEnabled: p.EmailEnabled,
 		PushEnabled:  p.PushEnabled,
 	}
@@ -556,6 +567,7 @@ type updateNotificationPreferencesRequest struct {
 	Survived     bool `json:"survived"`
 	MassWipeout  bool `json:"mass_wipeout"`
 	Buyback      bool `json:"buyback"`
+	WeeklyRecap  bool `json:"weekly_recap"`
 	EmailEnabled bool `json:"email_enabled"`
 	PushEnabled  bool `json:"push_enabled"`
 }

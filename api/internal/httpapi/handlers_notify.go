@@ -147,6 +147,7 @@ func (a *API) handleUpdateNotificationPreferences(w http.ResponseWriter, r *http
 		Survived:     req.Survived,
 		MassWipeout:  req.MassWipeout,
 		Buyback:      req.Buyback,
+		WeeklyRecap:  req.WeeklyRecap,
 		EmailEnabled: req.EmailEnabled,
 		PushEnabled:  req.PushEnabled,
 	})

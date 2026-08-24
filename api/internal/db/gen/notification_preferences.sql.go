@@ -53,16 +53,17 @@ func (q *Queries) GetOrCreateNotificationPreferences(ctx context.Context, userID
 
 const upsertNotificationPreferences = `-- name: UpsertNotificationPreferences :one
 INSERT INTO notification_preferences
-    (user_id, pick_reminder, eliminated, survived, mass_wipeout, buyback, email_enabled, push_enabled)
+    (user_id, pick_reminder, eliminated, survived, mass_wipeout, buyback, weekly_recap, email_enabled, push_enabled)
 VALUES
     ($1, $2, $3, $4,
-     $5, $6, $7, $8)
+     $5, $6, $7, $8, $9)
 ON CONFLICT (user_id) DO UPDATE SET
     pick_reminder = EXCLUDED.pick_reminder,
     eliminated    = EXCLUDED.eliminated,
     survived      = EXCLUDED.survived,
     mass_wipeout  = EXCLUDED.mass_wipeout,
     buyback       = EXCLUDED.buyback,
+    weekly_recap  = EXCLUDED.weekly_recap,
     email_enabled = EXCLUDED.email_enabled,
     push_enabled  = EXCLUDED.push_enabled,
     updated_at    = now()
@@ -76,6 +77,7 @@ type UpsertNotificationPreferencesParams struct {
 	Survived     bool        `json:"survived"`
 	MassWipeout  bool        `json:"mass_wipeout"`
 	Buyback      bool        `json:"buyback"`
+	WeeklyRecap  bool        `json:"weekly_recap"`
 	EmailEnabled bool        `json:"email_enabled"`
 	PushEnabled  bool        `json:"push_enabled"`
 }
@@ -92,6 +94,7 @@ func (q *Queries) UpsertNotificationPreferences(ctx context.Context, arg UpsertN
 		arg.Survived,
 		arg.MassWipeout,
 		arg.Buyback,
+		arg.WeeklyRecap,
 		arg.EmailEnabled,
 		arg.PushEnabled,
 	)

@@ -23,16 +23,17 @@ RETURNING *;
 -- GetOrCreateNotificationPreferences above) can still PUT straight away
 -- without a prior GET.
 INSERT INTO notification_preferences
-    (user_id, pick_reminder, eliminated, survived, mass_wipeout, buyback, email_enabled, push_enabled)
+    (user_id, pick_reminder, eliminated, survived, mass_wipeout, buyback, weekly_recap, email_enabled, push_enabled)
 VALUES
     (sqlc.arg(user_id), sqlc.arg(pick_reminder), sqlc.arg(eliminated), sqlc.arg(survived),
-     sqlc.arg(mass_wipeout), sqlc.arg(buyback), sqlc.arg(email_enabled), sqlc.arg(push_enabled))
+     sqlc.arg(mass_wipeout), sqlc.arg(buyback), sqlc.arg(weekly_recap), sqlc.arg(email_enabled), sqlc.arg(push_enabled))
 ON CONFLICT (user_id) DO UPDATE SET
     pick_reminder = EXCLUDED.pick_reminder,
     eliminated    = EXCLUDED.eliminated,
     survived      = EXCLUDED.survived,
     mass_wipeout  = EXCLUDED.mass_wipeout,
     buyback       = EXCLUDED.buyback,
+    weekly_recap  = EXCLUDED.weekly_recap,
     email_enabled = EXCLUDED.email_enabled,
     push_enabled  = EXCLUDED.push_enabled,
     updated_at    = now()

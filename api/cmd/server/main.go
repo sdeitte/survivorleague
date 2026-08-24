@@ -41,6 +41,7 @@ import (
 	"github.com/robfig/cron/v3"
 
 	"github.com/sdeitte/survivor-league-api/internal/admin"
+	"github.com/sdeitte/survivor-league-api/internal/aiclient"
 	"github.com/sdeitte/survivor-league-api/internal/auth"
 	"github.com/sdeitte/survivor-league-api/internal/db"
 	"github.com/sdeitte/survivor-league-api/internal/db/gen"
@@ -50,6 +51,7 @@ import (
 	"github.com/sdeitte/survivor-league-api/internal/livepoll"
 	"github.com/sdeitte/survivor-league-api/internal/notify"
 	"github.com/sdeitte/survivor-league-api/internal/picks"
+	"github.com/sdeitte/survivor-league-api/internal/recap"
 	"github.com/sdeitte/survivor-league-api/internal/schedule"
 )
 
@@ -116,6 +118,19 @@ func main() {
 		log.Print("warning: RESEND_API_KEY is not set — email notifications will fail until a key is configured")
 	}
 
+	// ANTHROPIC_BASE_URL/ANTHROPIC_MODEL are configurable for the same
+	// reason CFBD_BASE_URL/RESEND_BASE_URL are above. ANTHROPIC_API_KEY has
+	// no real value in this environment yet — same "flagged but
+	// unavailable" treatment: weekly recap generation will fail (logged by
+	// internal/grading, non-fatal to the week's finalization itself) until
+	// a real key is configured.
+	anthropicBaseURL := getenv("ANTHROPIC_BASE_URL", aiclient.DefaultBaseURL)
+	anthropicModel := getenv("ANTHROPIC_MODEL", aiclient.DefaultModel)
+	anthropicAPIKey := os.Getenv("ANTHROPIC_API_KEY")
+	if anthropicAPIKey == "" {
+		log.Print("warning: ANTHROPIC_API_KEY is not set — weekly recap generation will fail until a key is configured")
+	}
+
 	// Both are required from Phase 1 onward: every route except /health
 	// needs a database, and no token can be issued/verified without a
 	// signing secret. Fail fast rather than booting into a half-broken state.
@@ -162,7 +177,16 @@ func main() {
 	notifyService := notify.NewService(queries, pool, pushSender, emailSender, notify.WithWebBaseURL(webBaseURL))
 
 	leaguesService := leagues.NewService(queries, pool, leagues.WithNotifier(notifyService))
-	gradingService := grading.NewService(queries, pool, grading.WithNotifier(notifyService))
+
+	// recapService generates the AI weekly recap (internal/recap) and, on
+	// success, enqueues its email delivery through notifyService — see
+	// recap.WithEmailNotifier. Constructed before gradingService, which
+	// takes it as a grading.RecapGenerator (see grading.WithRecapGenerator),
+	// same wiring shape as notifyService above.
+	aiClient := aiclient.NewClient(http.DefaultClient, anthropicBaseURL, anthropicAPIKey, anthropicModel)
+	recapService := recap.NewService(queries, aiClient, recap.WithEmailNotifier(notifyService))
+
+	gradingService := grading.NewService(queries, pool, grading.WithNotifier(notifyService), grading.WithRecapGenerator(recapService))
 
 	// adminService is constructed after gradingService (Phase 8's single-
 	// game resync path — POST /admin/games/:id/resync — reuses
@@ -178,6 +202,7 @@ func main() {
 		AdminService:      adminService,
 		PicksService:      picksService,
 		NotifyService:     notifyService,
+		RecapService:      recapService,
 		JWT:               jwtIssuer,
 		AppEnv:            appEnv,
 		CORSAllowedOrigin: corsAllowedOrigin,

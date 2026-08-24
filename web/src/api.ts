@@ -273,6 +273,7 @@ export interface NotificationPreferences {
   survived: boolean
   mass_wipeout: boolean
   buyback: boolean
+  weekly_recap: boolean
   email_enabled: boolean
   push_enabled: boolean
 }
@@ -579,6 +580,17 @@ export async function listWeekPicks(leagueId: string, weekId: string): Promise<M
 
 export async function getLeaderboard(leagueId: string): Promise<LeaderboardEntry[]> {
   return apiFetch<LeaderboardEntry[]>(`/leagues/${leagueId}/leaderboard`)
+}
+
+export interface WeekRecap {
+  body: string
+  generated_at: string
+}
+
+// Throws ApiError with status 404 if no week has finalized yet for this
+// league — callers should treat that as "nothing to show", not an error.
+export async function getLatestRecap(leagueId: string): Promise<WeekRecap> {
+  return apiFetch<WeekRecap>(`/leagues/${leagueId}/recap`)
 }
 
 export interface MembershipWeekPick {

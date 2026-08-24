@@ -18,13 +18,17 @@ import (
 	"github.com/sdeitte/survivor-league-api/internal/db/gen"
 )
 
-// The five notification types per the plan's Notifications section.
+// The notification types.
 const (
 	TypePickReminder = "pick_reminder"
 	TypeEliminated   = "eliminated"
 	TypeSurvived     = "survived"
 	TypeMassWipeout  = "mass_wipeout"
 	TypeBuyback      = "buyback"
+	// TypeWeeklyRecap is the AI-generated weekly recap — email-only (see
+	// EnqueueWeeklyRecap), unlike every other type above which sends push
+	// too.
+	TypeWeeklyRecap = "weekly_recap"
 )
 
 // The two delivery channels.
@@ -222,6 +226,43 @@ func (s *Service) EnqueuePickReminder(ctx context.Context, membershipID, leagueI
 	body := fmt.Sprintf("You haven't made your pick in %s yet — your deadline is in %s.", league.Name, windowLabel)
 	dedupeBase := fmt.Sprintf("%s:%s:%s:%s", TypePickReminder, window, db.UUIDString(membershipID), db.UUIDString(weekID))
 	return s.enqueueEvent(ctx, membership.UserID, leagueID, weekID, TypePickReminder, []string{ChannelPush, ChannelEmail}, dedupeBase, title, body)
+}
+
+// EnqueueWeeklyRecap enqueues one email-only row per active (non-removed)
+// member of leagueID for the AI-generated weekly recap — unlike every
+// other Enqueue* method above, this is per-LEAGUE, not per-membership
+// (called once, from internal/recap.Service.GenerateWeekRecap right after
+// it stores the recap, via the recap.EmailNotifier interface Service
+// satisfies structurally), so it fans out to every member itself rather
+// than the caller doing it. recapBody is used as-is as the email body —
+// see GenerateWeekRecap's doc comment for how that text is constrained to
+// real facts only.
+func (s *Service) EnqueueWeeklyRecap(ctx context.Context, leagueID, weekID pgtype.UUID, recapBody string) error {
+	league, err := s.queries.GetLeagueByID(ctx, leagueID)
+	if err != nil {
+		return fmt.Errorf("notify: load league %s: %w", db.UUIDString(leagueID), err)
+	}
+	week, err := s.queries.GetWeekByID(ctx, weekID)
+	if err != nil {
+		return fmt.Errorf("notify: load week %s: %w", db.UUIDString(weekID), err)
+	}
+	members, err := s.queries.ListActiveMembersWithUser(ctx, leagueID)
+	if err != nil {
+		return fmt.Errorf("notify: list members for league %s: %w", db.UUIDString(leagueID), err)
+	}
+
+	title := fmt.Sprintf("%s — Week %d recap", league.Name, week.WeekNumber)
+	var firstErr error
+	for _, m := range members {
+		dedupeBase := fmt.Sprintf("%s:%s:%s", TypeWeeklyRecap, db.UUIDString(m.MembershipID), db.UUIDString(weekID))
+		if err := s.enqueueEvent(ctx, m.UserID, leagueID, weekID, TypeWeeklyRecap, []string{ChannelEmail}, dedupeBase, title, recapBody); err != nil {
+			log.Printf("notify: enqueue weekly recap for membership %s: %v", db.UUIDString(m.MembershipID), err)
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	return firstErr
 }
 
 // SendLeagueClosedEmail sends a direct, synchronous transactional email
@@ -433,6 +474,8 @@ func typeEnabled(p gen.NotificationPreference, notifType string) bool {
 		return p.MassWipeout
 	case TypeBuyback:
 		return p.Buyback
+	case TypeWeeklyRecap:
+		return p.WeeklyRecap
 	default:
 		return true
 	}

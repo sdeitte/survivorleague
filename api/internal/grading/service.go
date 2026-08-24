@@ -45,12 +45,23 @@ type Notifier interface {
 	EnqueueMassWipeout(ctx context.Context, membershipID, leagueID, weekID pgtype.UUID) error
 }
 
+// RecapGenerator is the AI-weekly-recap surface TryFinalizeLeagueWeek
+// calls into once a league-week's finalization has committed — the same
+// decoupling rationale as Notifier (*recap.Service satisfies this
+// structurally; this package never imports internal/recap or
+// internal/aiclient). A nil RecapGenerator is a valid, silent no-op, same
+// as a nil Notifier.
+type RecapGenerator interface {
+	GenerateWeekRecap(ctx context.Context, leagueID, weekID pgtype.UUID) error
+}
+
 // Service implements the grading/elimination pipeline on top of the
 // sqlc-generated queries.
 type Service struct {
 	queries  *gen.Queries
 	pool     *pgxpool.Pool
 	notifier Notifier
+	recap    RecapGenerator
 }
 
 // Option configures a Service at construction time.
@@ -61,6 +72,13 @@ type Option func(*Service)
 // notification side effects of finalization.
 func WithNotifier(n Notifier) Option {
 	return func(s *Service) { s.notifier = n }
+}
+
+// WithRecapGenerator wires a RecapGenerator into the Service — see the
+// RecapGenerator type doc comment. Omit in any test that doesn't care
+// about weekly-recap generation.
+func WithRecapGenerator(r RecapGenerator) Option {
+	return func(s *Service) { s.recap = r }
 }
 
 // NewService constructs a Service. pool is used for GradeGame's and
@@ -320,6 +338,17 @@ func (s *Service) TryFinalizeLeagueWeek(ctx context.Context, leagueID, weekID pg
 					log.Printf("grading: enqueue survived notification for membership %s: %v", db.UUIDString(membershipID), err)
 				}
 			}
+		}
+	}
+
+	// AI weekly recap: generated unconditionally (mass-wipeout weeks are
+	// exactly the kind of thing worth recapping too), same commit-then-
+	// side-effect placement and non-fatal-on-failure treatment as the
+	// notifications above. See the RecapGenerator type doc comment for why
+	// s.recap may be nil.
+	if s.recap != nil {
+		if err := s.recap.GenerateWeekRecap(ctx, leagueID, weekID); err != nil {
+			log.Printf("grading: generate week recap for league %s week %s: %v", db.UUIDString(leagueID), db.UUIDString(weekID), err)
 		}
 	}
 

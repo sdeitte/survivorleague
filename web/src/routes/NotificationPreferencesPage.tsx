@@ -16,6 +16,7 @@ const TYPE_TOGGLES: { key: keyof NotificationPreferences; label: string; descrip
   { key: 'survived', label: 'Survived', description: 'When your pick holds up for the week (push only).' },
   { key: 'mass_wipeout', label: 'Mass wipeout', description: 'When everyone in a league loses and nobody is eliminated that week.' },
   { key: 'buyback', label: 'Buy-back', description: 'When a commissioner reinstates you after an elimination.' },
+  { key: 'weekly_recap', label: 'Weekly recap', description: 'The AI-written recap of your league’s week, once results are final (email only).' },
 ]
 
 const CHANNEL_TOGGLES: { key: keyof NotificationPreferences; label: string; description: string }[] = [

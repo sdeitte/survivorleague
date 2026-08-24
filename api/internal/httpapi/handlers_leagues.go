@@ -16,6 +16,7 @@ import (
 	"github.com/sdeitte/survivor-league-api/internal/db"
 	"github.com/sdeitte/survivor-league-api/internal/db/gen"
 	"github.com/sdeitte/survivor-league-api/internal/leagues"
+	"github.com/sdeitte/survivor-league-api/internal/recap"
 )
 
 func (a *API) handleListConferences(w http.ResponseWriter, r *http.Request) {
@@ -311,6 +312,34 @@ func (a *API) handleGetLeaderboard(w http.ResponseWriter, r *http.Request) {
 		out = append(out, toLeaderboardEntryResponse(row))
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// handleGetLatestRecap implements GET /leagues/:id/recap (requireLeagueMember)
+// — the most recently generated AI weekly recap for the league (see
+// internal/recap.Service.GenerateWeekRecap), regardless of which week it
+// was for. 404 if no week has finalized yet (a brand-new league).
+func (a *API) handleGetLatestRecap(w http.ResponseWriter, r *http.Request) {
+	lc, ok := LeagueFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusForbidden, "not a member of this league")
+		return
+	}
+
+	rec, err := a.recapService.GetLatestRecap(r.Context(), lc.League.ID)
+	if err != nil {
+		if errors.Is(err, recap.ErrNoRecapYet) {
+			writeError(w, http.StatusNotFound, "no recap generated yet for this league")
+			return
+		}
+		log.Printf("get latest recap: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to load recap")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, weekRecapResponse{
+		Body:        rec.Body,
+		GeneratedAt: formatTimestamp(rec.GeneratedAt),
+	})
 }
 
 // handleRemoveMember implements DELETE /leagues/:id/members/:membershipId.

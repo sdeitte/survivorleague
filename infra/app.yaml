@@ -87,6 +87,13 @@ services:
       - key: EXPO_ACCESS_TOKEN
         value: ${EXPO_ACCESS_TOKEN}
         type: SECRET
+      # Powers the AI weekly recap (internal/recap) — a separate
+      # console.anthropic.com API key/billing account, not the $20/mo
+      # claude.ai consumer subscription. ANTHROPIC_MODEL/ANTHROPIC_BASE_URL
+      # are left unset here to take internal/aiclient's defaults.
+      - key: ANTHROPIC_API_KEY
+        value: ${ANTHROPIC_API_KEY}
+        type: SECRET
 
 static_sites:
   - name: web
