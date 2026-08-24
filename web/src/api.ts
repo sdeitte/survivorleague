@@ -579,6 +579,30 @@ export async function getLatestRecap(leagueId: string): Promise<WeekRecap> {
   return apiFetch<WeekRecap>(`/leagues/${leagueId}/recap`)
 }
 
+export interface ChatMessage {
+  id: string
+  display_name: string
+  body: string
+  created_at: string
+}
+
+// Last 7 days only — the server enforces this (see internal/chat.Service),
+// this endpoint never returns older messages regardless of how far back a
+// caller might expect.
+export async function listMessages(leagueId: string): Promise<ChatMessage[]> {
+  return apiFetch<ChatMessage[]>(`/leagues/${leagueId}/messages`)
+}
+
+export async function postMessage(leagueId: string, body: string): Promise<ChatMessage> {
+  return apiFetch<ChatMessage>(`/leagues/${leagueId}/messages`, { method: 'POST', body: { body } })
+}
+
+// Commissioner-only server-side (RequireCommissioner) — this is the
+// feed's only moderation tool, there's no automated filtering.
+export async function deleteMessage(leagueId: string, messageId: string): Promise<void> {
+  await apiFetch<void>(`/leagues/${leagueId}/messages/${messageId}`, { method: 'DELETE' })
+}
+
 export interface MembershipWeekPick {
   week_number: number
   has_picked: boolean

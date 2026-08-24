@@ -119,6 +119,7 @@ func TestRouteTable_CommissionerOnlyRoutesRequireCommissioner(t *testing.T) {
 		"GET /leagues/{id}/invite":                          false,
 		"POST /leagues/{id}/invite/regenerate":              false,
 		"POST /leagues/{id}/invite/send":                    false,
+		"DELETE /leagues/{id}/messages/{messageId}":         false,
 	}
 
 	for _, e := range entries {
@@ -146,8 +147,9 @@ func TestRouteTable_MemberOnlyRoutesDoNotOverRestrict(t *testing.T) {
 	entries := walkRoutes(t, buildTestRouter(t))
 
 	want := map[string]bool{
-		"GET /leagues/{id}/":        false,
-		"GET /leagues/{id}/members": false,
+		"GET /leagues/{id}/":         false,
+		"GET /leagues/{id}/members":  false,
+		"GET /leagues/{id}/messages": false,
 	}
 
 	for _, e := range entries {
@@ -293,6 +295,7 @@ func TestRouteTable_MutatingRoutesRequireLeagueOpen(t *testing.T) {
 		"POST /leagues/{id}/invite/regenerate":              false,
 		"POST /leagues/{id}/invite/send":                    false,
 		"PUT /leagues/{id}/weeks/{weekId}/picks/me":         false,
+		"POST /leagues/{id}/messages":                       false,
 	}
 
 	for _, e := range entries {

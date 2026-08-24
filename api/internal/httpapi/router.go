@@ -11,6 +11,7 @@ import (
 
 	"github.com/sdeitte/survivor-league-api/internal/admin"
 	"github.com/sdeitte/survivor-league-api/internal/auth"
+	"github.com/sdeitte/survivor-league-api/internal/chat"
 	"github.com/sdeitte/survivor-league-api/internal/leagues"
 	"github.com/sdeitte/survivor-league-api/internal/notify"
 	"github.com/sdeitte/survivor-league-api/internal/picks"
@@ -28,6 +29,7 @@ type Deps struct {
 	PicksService      *picks.Service
 	NotifyService     *notify.Service
 	RecapService      *recap.Service
+	ChatService       *chat.Service
 	JWT               *auth.JWTIssuer
 	AppEnv            string // "development" | "production" — gates cookie Secure flag
 	CORSAllowedOrigin string
@@ -43,6 +45,7 @@ type API struct {
 	picksService    *picks.Service
 	notifyService   *notify.Service
 	recapService    *recap.Service
+	chatService     *chat.Service
 	jwt             *auth.JWTIssuer
 	appEnv          string
 }
@@ -61,6 +64,7 @@ func NewRouter(d Deps) http.Handler {
 		picksService:    d.PicksService,
 		notifyService:   d.NotifyService,
 		recapService:    d.RecapService,
+		chatService:     d.ChatService,
 		jwt:             d.JWT,
 		appEnv:          d.AppEnv,
 	}
@@ -122,6 +126,9 @@ func NewRouter(d Deps) http.Handler {
 		r.With(a.RequireLeagueMember).Get("/leaderboard", a.handleGetLeaderboard)
 		r.With(a.RequireLeagueMember).Get("/recap", a.handleGetLatestRecap)
 		r.With(a.RequireLeagueMember).Get("/current-week", a.handleGetCurrentWeek)
+		r.With(a.RequireLeagueMember).Get("/messages", a.handleListMessages)
+		r.With(a.RequireLeagueMember, a.RequireLeagueOpen).Post("/messages", a.handlePostMessage)
+		r.With(a.RequireCommissioner).Delete("/messages/{messageId}", a.handleDeleteMessage)
 		r.With(a.RequireCommissioner, a.RequireLeagueOpen).Delete("/members/{membershipId}", a.handleRemoveMember)
 		r.With(a.RequireCommissioner, a.RequireLeagueOpen).Post("/members/{membershipId}/buyback", a.handleBuyBackMember)
 		r.With(a.RequireCommissioner).Get("/invite", a.handleGetInviteCode)

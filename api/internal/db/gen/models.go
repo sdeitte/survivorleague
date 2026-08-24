@@ -102,6 +102,14 @@ type LeagueMembership struct {
 	RemovedAt        pgtype.Timestamptz `json:"removed_at"`
 }
 
+type LeagueMessage struct {
+	ID        pgtype.UUID        `json:"id"`
+	LeagueID  pgtype.UUID        `json:"league_id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	Body      string             `json:"body"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type LeagueWeekResult struct {
 	ID          pgtype.UUID        `json:"id"`
 	LeagueID    pgtype.UUID        `json:"league_id"`

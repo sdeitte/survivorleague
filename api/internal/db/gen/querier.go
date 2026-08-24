@@ -67,6 +67,11 @@ type Querier interface {
 	CreateSyncRun(ctx context.Context, arg CreateSyncRunParams) (SyncRun, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteDeviceToken(ctx context.Context, arg DeleteDeviceTokenParams) error
+	// Scoped by league_id (not just id) so a commissioner can never delete a
+	// message belonging to a different league by guessing/reusing an id —
+	// the handler treats 0 rows affected as "not found" (wrong id or wrong
+	// league), same convention as every other scoped-delete in this codebase.
+	DeleteLeagueMessage(ctx context.Context, arg DeleteLeagueMessageParams) (int64, error)
 	// Best-effort cleanup for a week that CFBD's calendar lists as
 	// seasonType=regular (so SyncSeason inserts it) but that turned out to
 	// have zero actual games attached — e.g. a scheduling-gap week CFBD
@@ -200,6 +205,11 @@ type Querier interface {
 	// query) — otherwise every pick would wrongly grade as a loss, since
 	// `team_id = NULL` is never true in SQL.
 	GradePicksForGame(ctx context.Context, arg GradePicksForGameParams) error
+	// Returns the same shape ListRecentLeagueMessages does (display_name
+	// joined in via the same WITH-then-join, not a second round trip) so the
+	// POST handler's response and the GET list's rows are one response type,
+	// not two.
+	InsertLeagueMessage(ctx context.Context, arg InsertLeagueMessageParams) (InsertLeagueMessageRow, error)
 	// The idempotency guard for league-week finalization: ON CONFLICT DO
 	// NOTHING against UNIQUE(league_id, week_id) means a second concurrent
 	// (or re-fired) TryFinalizeLeagueWeek call for the same league/week gets
@@ -340,6 +350,12 @@ type Querier interface {
 	// layer applies the pre-lock privacy rule (hiding game_id/team_id for
 	// other members' not-yet-started picks), not this query.
 	ListPicksByWeekForLeague(ctx context.Context, arg ListPicksByWeekForLeagueParams) ([]ListPicksByWeekForLeagueRow, error)
+	// Every message in the league newer than `since` (internal/chat.Service
+	// computes this as now()-7days — the TTL is entirely a read-time filter,
+	// see 00006_league_chat.sql), joined with the sender's display_name so
+	// the chat UI doesn't need N+1 lookups. Oldest first (chat reads
+	// top-to-bottom), unlike most of this codebase's other list queries.
+	ListRecentLeagueMessages(ctx context.Context, arg ListRecentLeagueMessagesParams) ([]ListRecentLeagueMessagesRow, error)
 	ListSyncRuns(ctx context.Context, rowLimit int32) ([]SyncRun, error)
 	// Every synced team's SP+ rating for the season — fetched once per
 	// available-teams call and merged in Go (internal/picks/service.go) into

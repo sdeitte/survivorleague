@@ -249,6 +249,42 @@ type weekRecapResponse struct {
 	GeneratedAt string `json:"generated_at"`
 }
 
+// chatMessageResponse is one row of GET /leagues/:id/messages, and the
+// body of POST /leagues/:id/messages.
+type chatMessageResponse struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name"`
+	Body        string `json:"body"`
+	CreatedAt   string `json:"created_at"`
+}
+
+// InsertLeagueMessage returns the same joined shape ListRecentLeagueMessages
+// does (see its query comment: display_name joined in, not a second round
+// trip), so the GET list and POST response share this one response type —
+// just two tiny converters, one per distinct sqlc row type, since Go
+// structs don't unify without an explicit conversion either way.
+func toChatMessageResponse(row gen.ListRecentLeagueMessagesRow) chatMessageResponse {
+	return chatMessageResponse{
+		ID:          db.UUIDString(row.ID),
+		DisplayName: row.DisplayName,
+		Body:        row.Body,
+		CreatedAt:   formatTimestamp(row.CreatedAt),
+	}
+}
+
+func toChatMessageResponseFromInsert(row gen.InsertLeagueMessageRow) chatMessageResponse {
+	return chatMessageResponse{
+		ID:          db.UUIDString(row.ID),
+		DisplayName: row.DisplayName,
+		Body:        row.Body,
+		CreatedAt:   formatTimestamp(row.CreatedAt),
+	}
+}
+
+type postChatMessageRequest struct {
+	Body string `json:"body"`
+}
+
 type inviteCodeResponse struct {
 	InviteCode string `json:"invite_code"`
 	// Joinable mirrors invitePreviewResponse's field of the same name — see

@@ -43,6 +43,7 @@ import (
 	"github.com/sdeitte/survivor-league-api/internal/admin"
 	"github.com/sdeitte/survivor-league-api/internal/aiclient"
 	"github.com/sdeitte/survivor-league-api/internal/auth"
+	"github.com/sdeitte/survivor-league-api/internal/chat"
 	"github.com/sdeitte/survivor-league-api/internal/db"
 	"github.com/sdeitte/survivor-league-api/internal/db/gen"
 	"github.com/sdeitte/survivor-league-api/internal/grading"
@@ -165,6 +166,7 @@ func main() {
 	cfbdClient := schedule.NewCFBDClient(http.DefaultClient, cfbdBaseURL, cfbdAPIKey)
 	scheduleService := schedule.NewService(queries, cfbdClient)
 	picksService := picks.NewService(queries, pool)
+	chatService := chat.NewService(queries)
 
 	// --- Notifications (Phase 7) ---
 	//
@@ -203,6 +205,7 @@ func main() {
 		PicksService:      picksService,
 		NotifyService:     notifyService,
 		RecapService:      recapService,
+		ChatService:       chatService,
 		JWT:               jwtIssuer,
 		AppEnv:            appEnv,
 		CORSAllowedOrigin: corsAllowedOrigin,

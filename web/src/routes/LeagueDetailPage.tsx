@@ -4,11 +4,13 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import * as Dialog from '@radix-ui/react-dialog'
 import { BrandWordmark } from '../components/BrandWordmark'
 import { LeaderboardList } from '../components/LeaderboardList'
+import { LeagueChat } from '../components/LeagueChat'
 import { getConferenceLogoUrl } from '../leagues/conferenceLogos'
 import {
   buyBackMember,
   closeLeague,
   getInviteCode,
+  getLatestRecap,
   getLeaderboard,
   getLeague,
   regenerateInviteCode,
@@ -48,7 +50,20 @@ export function LeagueDetailPage() {
     queryKey: ['league', id, 'leaderboard'],
     queryFn: () => getLeaderboard(id!),
     enabled: !!id,
+    // Standings only change when a game finalizes — a slow poll is plenty,
+    // matching the old standalone Leaderboard page's identical interval.
+    refetchInterval: 60_000,
   })
+  const recapQuery = useQuery({
+    queryKey: ['league', id, 'recap'],
+    queryFn: () => getLatestRecap(id!),
+    enabled: !!id,
+    // A 404 (no week has finalized yet) is expected/terminal, not worth
+    // retrying — same treatment every other "might not exist yet" query
+    // in this app gives its own 404 case.
+    retry: false,
+  })
+  const noRecapYet = recapQuery.error instanceof ApiError && recapQuery.error.status === 404
 
   const isCommissioner = leagueQuery.data?.membership.role === 'commissioner'
 
@@ -196,26 +211,18 @@ export function LeagueDetailPage() {
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-2">
-          {isClosed ? (
-            <span className="block text-center rounded-md bg-slate-800 px-3 py-2 text-sm font-medium text-slate-500 cursor-not-allowed">
-              Make your pick
-            </span>
-          ) : (
-            <Link
-              to={`/leagues/${id}/picks`}
-              className="block text-center rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500 transition-colors"
-            >
-              Make your pick
-            </Link>
-          )}
+        {isClosed ? (
+          <span className="block text-center rounded-md bg-slate-800 px-3 py-2 text-sm font-medium text-slate-500 cursor-not-allowed">
+            Make your pick
+          </span>
+        ) : (
           <Link
-            to={`/leagues/${id}/leaderboard`}
-            className="block text-center rounded-md border border-slate-700 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-slate-800 transition-colors"
+            to={`/leagues/${id}/picks`}
+            className="block text-center rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500 transition-colors"
           >
-            Leaderboard
+            Make your pick
           </Link>
-        </div>
+        )}
 
         <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-1">
           <div className="flex items-center justify-between">
@@ -349,6 +356,15 @@ export function LeagueDetailPage() {
         )}
 
         {actionError && <p className="text-red-400 text-sm">{actionError}</p>}
+
+        <LeagueChat leagueId={id!} isCommissioner={isCommissioner} />
+
+        {recapQuery.data && !noRecapYet && (
+          <section className="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-2">
+            <h2 className="text-sm font-medium text-slate-200">This week's recap</h2>
+            <p className="text-sm text-slate-300 whitespace-pre-line">{recapQuery.data.body}</p>
+          </section>
+        )}
 
         <div className="space-y-2">
           <h2 className="text-sm font-medium text-slate-200">Leaderboard</h2>
