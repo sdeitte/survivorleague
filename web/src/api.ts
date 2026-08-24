@@ -135,19 +135,8 @@ export interface League {
   membership: MembershipSummary
 }
 
-export interface Member {
-  membership_id: string
-  user_id: string
-  display_name: string
-  role: 'commissioner' | 'player'
-  is_contestant: boolean
-  status: 'active' | 'eliminated'
-  bought_back: boolean
-  joined_at: string
-}
-
 // Membership is the full record returned by the buy-back endpoint —
-// richer than Member/MembershipSummary since it surfaces the
+// richer than LeaderboardEntry/MembershipSummary since it surfaces the
 // eliminated_*/bought_back_* fields a buy-back response needs to show.
 export interface Membership {
   membership_id: string
@@ -255,6 +244,7 @@ export interface MemberPickStatus {
 export interface LeaderboardEntry {
   membership_id: string
   display_name: string
+  role: 'commissioner' | 'player'
   status: 'active' | 'eliminated'
   is_contestant: boolean
   eliminated_week_id?: string
@@ -466,10 +456,6 @@ export async function updateLeague(
   input: { name?: string; commissioner_is_contestant?: boolean },
 ): Promise<League> {
   return apiFetch<League>(`/leagues/${id}`, { method: 'PATCH', body: input })
-}
-
-export async function listMembers(leagueId: string): Promise<Member[]> {
-  return apiFetch<Member[]>(`/leagues/${leagueId}/members`)
 }
 
 export async function removeMember(leagueId: string, membershipId: string): Promise<void> {

@@ -221,6 +221,7 @@ func toMembershipResponse(m gen.LeagueMembership) membershipResponse {
 type leaderboardEntryResponse struct {
 	MembershipID     string `json:"membership_id"`
 	DisplayName      string `json:"display_name"`
+	Role             string `json:"role"`
 	Status           string `json:"status"`
 	IsContestant     bool   `json:"is_contestant"`
 	EliminatedWeekID string `json:"eliminated_week_id,omitempty"`
@@ -231,6 +232,7 @@ func toLeaderboardEntryResponse(row gen.ListLeaderboardForLeagueRow) leaderboard
 	return leaderboardEntryResponse{
 		MembershipID:     db.UUIDString(row.MembershipID),
 		DisplayName:      row.DisplayName,
+		Role:             row.Role,
 		Status:           row.Status,
 		IsContestant:     row.IsContestant,
 		EliminatedWeekID: pgUUIDStringOrEmpty(row.EliminatedWeekID),

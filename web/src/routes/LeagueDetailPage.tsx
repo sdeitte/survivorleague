@@ -8,15 +8,15 @@ import {
   buyBackMember,
   closeLeague,
   getInviteCode,
+  getLeaderboard,
   getLeague,
-  listMembers,
   regenerateInviteCode,
   removeMember,
   sendInvites,
   updateLeague,
   ApiError,
   type InviteSendResult,
-  type Member,
+  type LeaderboardEntry,
 } from '../api'
 
 export function LeagueDetailPage() {
@@ -25,8 +25,8 @@ export function LeagueDetailPage() {
   const queryClient = useQueryClient()
   const [actionError, setActionError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
-  const [memberToRemove, setMemberToRemove] = useState<Member | null>(null)
-  const [memberToBuyBack, setMemberToBuyBack] = useState<Member | null>(null)
+  const [memberToRemove, setMemberToRemove] = useState<LeaderboardEntry | null>(null)
+  const [memberToBuyBack, setMemberToBuyBack] = useState<LeaderboardEntry | null>(null)
   const [closeModalOpen, setCloseModalOpen] = useState(false)
   const [closeConfirmText, setCloseConfirmText] = useState('')
   const [inviteRows, setInviteRows] = useState<{ name: string; email: string }[]>([{ name: '', email: '' }])
@@ -37,9 +37,15 @@ export function LeagueDetailPage() {
     queryFn: () => getLeague(id!),
     enabled: !!id,
   })
+  // The league overview's member-management list IS the leaderboard —
+  // same data, same sort order (active first, then eliminated by how long
+  // they lasted), just with commissioner actions (buy-back/remove)
+  // attached to each row. No separate "plain members list" endpoint/query
+  // — see leaderboard.sql's role column addition, which is what made this
+  // possible (it previously only came from the now-removed listMembers).
   const membersQuery = useQuery({
-    queryKey: ['league', id, 'members'],
-    queryFn: () => listMembers(id!),
+    queryKey: ['league', id, 'leaderboard'],
+    queryFn: () => getLeaderboard(id!),
     enabled: !!id,
   })
 
@@ -70,7 +76,7 @@ export function LeagueDetailPage() {
     mutationFn: (membershipId: string) => removeMember(id!, membershipId),
     onSuccess: () => {
       setMemberToRemove(null)
-      void queryClient.invalidateQueries({ queryKey: ['league', id, 'members'] })
+      void queryClient.invalidateQueries({ queryKey: ['league', id, 'leaderboard'] })
     },
     onError: (err) => {
       setActionError(err instanceof ApiError ? err.message : 'Failed to remove member.')
@@ -82,7 +88,6 @@ export function LeagueDetailPage() {
     mutationFn: (membershipId: string) => buyBackMember(id!, membershipId),
     onSuccess: () => {
       setMemberToBuyBack(null)
-      void queryClient.invalidateQueries({ queryKey: ['league', id, 'members'] })
       void queryClient.invalidateQueries({ queryKey: ['league', id, 'leaderboard'] })
     },
     onError: (err) => {

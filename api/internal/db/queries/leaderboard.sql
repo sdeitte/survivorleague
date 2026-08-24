@@ -9,9 +9,14 @@
 -- eliminated_week_id is a UUID with no inherent order) — descending, so
 -- "eliminated later" (survived longer) ranks higher. display_name is a
 -- final stable tie-break.
+-- role is included so this one query can also back the league overview
+-- page's member-management list (commissioner/remove/buy-back actions
+-- need to know who's the commissioner) — see the API contract note on why
+-- that page no longer fetches a separate, differently-sorted member list.
 SELECT
     m.id AS membership_id,
     u.display_name AS display_name,
+    m.role AS role,
     m.status AS status,
     m.is_contestant AS is_contestant,
     m.eliminated_week_id AS eliminated_week_id,

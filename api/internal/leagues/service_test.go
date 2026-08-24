@@ -504,6 +504,12 @@ func TestService_ListLeaderboard_SortOrder(t *testing.T) {
 	if rows[3].EliminatedWeekID != week1.ID {
 		t.Errorf("row 3 (player2) eliminated_week_id = %v, want week1 (%v)", rows[3].EliminatedWeekID, week1.ID)
 	}
+	if rows[0].Role != "commissioner" {
+		t.Errorf("row 0 (commissioner) role = %q, want %q — the league overview page's member-management list depends on this to gate remove/commissioner-only UI", rows[0].Role, "commissioner")
+	}
+	if rows[1].Role != "player" {
+		t.Errorf("row 1 (player4) role = %q, want %q", rows[1].Role, "player")
+	}
 	for _, row := range rows {
 		if row.BoughtBack {
 			t.Errorf("row %s BoughtBack = true, want false (nobody in this fixture was bought back)", row.MembershipID)
