@@ -110,6 +110,17 @@ export function PicksPage() {
   const hasOwnPick = !!availableTeamsQuery.data?.current_pick
   const anyGameLockedThisWeek = availableTeamsQuery.data?.teams.some((t) => t.is_locked) ?? false
 
+  // Live pick-% denominator — how many of this league's members have
+  // picked ANY team so far this week. Summed client-side from each team's
+  // own pick_count rather than a separate field, since the available-
+  // teams response already carries everything needed. Not lock-gated
+  // (decision support while deciding, not a post-lock reveal) — see
+  // AvailableTeam's doc comment on the API side.
+  const totalPicksThisWeek = useMemo(
+    () => (availableTeamsQuery.data?.teams ?? []).reduce((sum, t) => sum + t.pick_count, 0),
+    [availableTeamsQuery.data],
+  )
+
   const weekPicksQuery = useQuery({
     queryKey: ['league', id, 'weeks', weekId, 'picks'],
     queryFn: () => listWeekPicks(id!, weekId!),
@@ -338,6 +349,26 @@ export function PicksPage() {
                           })}
                         </p>
                         {reason && <p className="text-xs text-amber-500 mt-0.5">{reason}</p>}
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          {team.win_probability !== undefined ? (
+                            <>
+                              {Math.round(team.win_probability * 100)}% to win
+                              {team.spread !== undefined && (
+                                <> · {team.spread > 0 ? '+' : ''}{team.spread}</>
+                              )}
+                            </>
+                          ) : team.sp_plus_rank !== undefined && team.opponent_sp_plus_rank !== undefined ? (
+                            <>SP+ #{team.sp_plus_rank} vs #{team.opponent_sp_plus_rank}</>
+                          ) : null}
+                          {totalPicksThisWeek > 0 && (
+                            <>
+                              {(team.win_probability !== undefined ||
+                                (team.sp_plus_rank !== undefined && team.opponent_sp_plus_rank !== undefined)) &&
+                                ' · '}
+                              {Math.round((team.pick_count / totalPicksThisWeek) * 100)}% of league ({team.pick_count})
+                            </>
+                          )}
+                        </p>
                       </div>
                     </div>
                     {team.is_locked && <span className="text-xs text-slate-500 shrink-0 ml-2">Locked</span>}

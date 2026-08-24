@@ -142,3 +142,33 @@ func (c *CFBDClient) GetGamesForWeek(ctx context.Context, year, week int) ([]cfb
 	}
 	return games, nil
 }
+
+// GetPregameWinProbabilities fetches CFBD's pregame win-probability/spread
+// model for the whole season via GET /metrics/wp/pregame?year= — omitting
+// `week` returns every week CFBD currently has data for in one call
+// (confirmed against the live API, same "whole season in one call"
+// convention as GetGames). CFBD only publishes this in the ~1 week before
+// a week's games kick off, so a season with mostly-future weeks legitimately
+// returns far fewer rows than GetGames does — that's expected, not an error.
+func (c *CFBDClient) GetPregameWinProbabilities(ctx context.Context, year int) ([]cfbdPregameWinProbability, error) {
+	var rows []cfbdPregameWinProbability
+	q := url.Values{"year": {fmt.Sprint(year)}}
+	if err := c.get(ctx, "/metrics/wp/pregame", q, &rows); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// GetSPRatings fetches CFBD's SP+ power ratings for the whole season via
+// GET /ratings/sp?year= — unlike pregame win probability, this is
+// available for the full season up front (confirmed against the live
+// API), so it's the fallback matchup-strength signal for weeks too far
+// out for a real win probability yet.
+func (c *CFBDClient) GetSPRatings(ctx context.Context, year int) ([]cfbdTeamSP, error) {
+	var rows []cfbdTeamSP
+	q := url.Values{"year": {fmt.Sprint(year)}}
+	if err := c.get(ctx, "/ratings/sp", q, &rows); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}

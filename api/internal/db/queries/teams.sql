@@ -48,3 +48,11 @@ ORDER BY conference ASC;
 -- refresh only pulls /games and needs to resolve CFBD's homeId/awayId
 -- against teams already synced by the daily full sync.
 SELECT * FROM teams WHERE external_id = sqlc.arg(external_id);
+
+-- name: GetTeamByName :one
+-- Backs SyncSPRatings: CFBD's /ratings/sp response identifies teams by
+-- name (not external_id, unlike every other CFBD endpoint this package
+-- consumes), so this is the one lookup keyed on name rather than
+-- external_id. A no-rows result is expected for CFBD's synthetic
+-- "nationalAverages" pseudo-team row — see cfbdTeamSP's doc comment.
+SELECT * FROM teams WHERE name = sqlc.arg(name);

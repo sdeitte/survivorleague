@@ -54,6 +54,15 @@ type Game struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
+type GamePrediction struct {
+	ID                 pgtype.UUID        `json:"id"`
+	GameID             pgtype.UUID        `json:"game_id"`
+	Spread             pgtype.Numeric     `json:"spread"`
+	HomeWinProbability pgtype.Numeric     `json:"home_win_probability"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
 type League struct {
 	ID                 pgtype.UUID        `json:"id"`
 	Name               string             `json:"name"`
@@ -129,6 +138,7 @@ type NotificationPreference struct {
 	PushEnabled  bool               `json:"push_enabled"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	WeeklyRecap  bool               `json:"weekly_recap"`
 }
 
 type NotificationsLog struct {
@@ -194,6 +204,16 @@ type Team struct {
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
+type TeamSpRating struct {
+	ID         pgtype.UUID        `json:"id"`
+	TeamID     pgtype.UUID        `json:"team_id"`
+	SeasonYear int32              `json:"season_year"`
+	Rating     pgtype.Numeric     `json:"rating"`
+	Ranking    pgtype.Int4        `json:"ranking"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
 type User struct {
 	ID              pgtype.UUID        `json:"id"`
 	Email           string             `json:"email"`
@@ -212,4 +232,12 @@ type Week struct {
 	WeekNumber int32              `json:"week_number"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
+type WeekRecap struct {
+	ID          pgtype.UUID        `json:"id"`
+	LeagueID    pgtype.UUID        `json:"league_id"`
+	WeekID      pgtype.UUID        `json:"week_id"`
+	Body        string             `json:"body"`
+	GeneratedAt pgtype.Timestamptz `json:"generated_at"`
 }

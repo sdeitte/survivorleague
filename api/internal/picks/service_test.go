@@ -408,7 +408,7 @@ func TestService_ListAvailableTeams_LockedAndUsedFlags(t *testing.T) {
 		t.Fatalf("week1 pick: %v", err)
 	}
 
-	teams, currentPick, hasCurrentPick, err := f.env.picks.ListAvailableTeams(context.Background(), f.member.ID, f.week2.ID, f.league.Conference)
+	teams, currentPick, hasCurrentPick, err := f.env.picks.ListAvailableTeams(context.Background(), f.member.ID, f.league.ID, f.week2.ID, f.league.Conference, f.league.SeasonYear)
 	if err != nil {
 		t.Fatalf("ListAvailableTeams (week2): %v", err)
 	}
@@ -435,7 +435,7 @@ func TestService_ListAvailableTeams_LockedAndUsedFlags(t *testing.T) {
 	// Now check week1's own list: teamA should show as the current pick,
 	// not locked (far-future kickoff), and NOT used-elsewhere (that flag
 	// only applies to OTHER weeks, not the week holding the pick itself).
-	teams1, currentPick1, hasCurrentPick1, err := f.env.picks.ListAvailableTeams(context.Background(), f.member.ID, f.week1.ID, f.league.Conference)
+	teams1, currentPick1, hasCurrentPick1, err := f.env.picks.ListAvailableTeams(context.Background(), f.member.ID, f.league.ID, f.week1.ID, f.league.Conference, f.league.SeasonYear)
 	if err != nil {
 		t.Fatalf("ListAvailableTeams (week1): %v", err)
 	}
@@ -452,6 +452,116 @@ func TestService_ListAvailableTeams_LockedAndUsedFlags(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestService_ListAvailableTeams_MatchupStatsAndPickCounts covers the
+// matchup-predictor/live-pick-% merge: win probability and spread
+// normalized to each team's own perspective (CFBD reports both from the
+// home team's side), SP+ rank surfaced for both a team and its opponent,
+// and pick counts scoped to the asking league only — none of it lock- or
+// privacy-gated, per the feature's explicit "decision support while
+// deciding" design.
+func TestService_ListAvailableTeams_MatchupStatsAndPickCounts(t *testing.T) {
+	f := newFixture(t, 48*time.Hour)
+	ctx := context.Background()
+
+	// gameA1 is teamA (home) vs oppX (away) — see newFixture's doc comment.
+	if _, err := f.env.q.UpsertGamePrediction(ctx, gen.UpsertGamePredictionParams{
+		GameID: f.gameA1.ID, Spread: numericFromFloat64(t, -7.5), HomeWinProbability: numericFromFloat64(t, 0.71),
+	}); err != nil {
+		t.Fatalf("UpsertGamePrediction: %v", err)
+	}
+	if _, err := f.env.q.UpsertTeamSPRating(ctx, gen.UpsertTeamSPRatingParams{
+		TeamID: f.teamA.ID, SeasonYear: f.league.SeasonYear, Rating: numericFromFloat64(t, 30), Ranking: pgtype.Int4{Int32: 5, Valid: true},
+	}); err != nil {
+		t.Fatalf("UpsertTeamSPRating (teamA): %v", err)
+	}
+	if _, err := f.env.q.UpsertTeamSPRating(ctx, gen.UpsertTeamSPRatingParams{
+		TeamID: f.oppX.ID, SeasonYear: f.league.SeasonYear, Rating: numericFromFloat64(t, 5), Ranking: pgtype.Int4{Int32: 60, Valid: true},
+	}); err != nil {
+		t.Fatalf("UpsertTeamSPRating (oppX): %v", err)
+	}
+
+	if _, err := f.env.picks.UpsertPick(ctx, f.member.ID, f.week1.ID, f.league.Conference, f.gameA1.ID, f.teamA.ID); err != nil {
+		t.Fatalf("commissioner's pick: %v", err)
+	}
+	otherUser := createTestUser(t, f.env.q, "other")
+	otherMember, err := f.env.leagues.JoinByCode(ctx, f.league.ID, otherUser.ID)
+	if err != nil {
+		t.Fatalf("JoinByCode: %v", err)
+	}
+	if _, err := f.env.picks.UpsertPick(ctx, otherMember.ID, f.week1.ID, f.league.Conference, f.gameA1.ID, f.teamA.ID); err != nil {
+		t.Fatalf("second member's pick: %v", err)
+	}
+
+	teams, _, _, err := f.env.picks.ListAvailableTeams(ctx, f.member.ID, f.league.ID, f.week1.ID, f.league.Conference, f.league.SeasonYear)
+	if err != nil {
+		t.Fatalf("ListAvailableTeams: %v", err)
+	}
+
+	var teamA, oppX *AvailableTeam
+	for i := range teams {
+		switch teams[i].Row.TeamID {
+		case f.teamA.ID:
+			teamA = &teams[i]
+		case f.oppX.ID:
+			oppX = &teams[i]
+		}
+	}
+	if teamA == nil || oppX == nil {
+		t.Fatalf("expected both teamA and oppX rows, got %+v", teams)
+	}
+
+	const epsilon = 1e-9
+	almostEqual := func(a, b float64) bool {
+		d := a - b
+		return d > -epsilon && d < epsilon
+	}
+
+	if teamA.WinProbability == nil || !almostEqual(*teamA.WinProbability, 0.71) {
+		t.Errorf("teamA.WinProbability = %v, want 0.71 (home team, unmodified)", teamA.WinProbability)
+	}
+	if teamA.Spread == nil || !almostEqual(*teamA.Spread, -7.5) {
+		t.Errorf("teamA.Spread = %v, want -7.5 (home team, unmodified)", teamA.Spread)
+	}
+	// oppX is the away side of the same game — both values must be negated
+	// relative to teamA's (CFBD reports them from the home team's side).
+	if oppX.WinProbability == nil || !almostEqual(*oppX.WinProbability, 0.29) {
+		t.Errorf("oppX.WinProbability = %v, want 0.29 (1 - home win probability)", oppX.WinProbability)
+	}
+	if oppX.Spread == nil || !almostEqual(*oppX.Spread, 7.5) {
+		t.Errorf("oppX.Spread = %v, want 7.5 (negated home spread)", oppX.Spread)
+	}
+
+	if teamA.SPRank == nil || *teamA.SPRank != 5 {
+		t.Errorf("teamA.SPRank = %v, want 5", teamA.SPRank)
+	}
+	if teamA.OpponentSPRank == nil || *teamA.OpponentSPRank != 60 {
+		t.Errorf("teamA.OpponentSPRank = %v, want 60 (oppX's rank)", teamA.OpponentSPRank)
+	}
+	if oppX.SPRank == nil || *oppX.SPRank != 60 {
+		t.Errorf("oppX.SPRank = %v, want 60", oppX.SPRank)
+	}
+
+	if teamA.PickCount != 2 {
+		t.Errorf("teamA.PickCount = %d, want 2 (both league members picked it)", teamA.PickCount)
+	}
+	if oppX.PickCount != 0 {
+		t.Errorf("oppX.PickCount = %d, want 0 (nobody picked it)", oppX.PickCount)
+	}
+}
+
+// numericFromFloat64 mirrors internal/schedule's identical unexported
+// helper (pgtype.Numeric.Scan only accepts a string, not a float64) — kept
+// as a small test-only copy here rather than exporting schedule's version
+// just for this.
+func numericFromFloat64(t *testing.T, f float64) pgtype.Numeric {
+	t.Helper()
+	var n pgtype.Numeric
+	if err := n.Scan(fmt.Sprintf("%v", f)); err != nil {
+		t.Fatalf("numericFromFloat64(%v): %v", f, err)
+	}
+	return n
 }
 
 // TestService_ListMembershipPicksForSeason covers the season-wide history

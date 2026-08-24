@@ -41,6 +41,33 @@ func (q *Queries) GetGame(ctx context.Context, id pgtype.UUID) (Game, error) {
 	return i, err
 }
 
+const getGameByExternalID = `-- name: GetGameByExternalID :one
+SELECT id, external_id, week_id, home_team_id, away_team_id, kickoff_at, status, home_score, away_score, winner_team_id, graded_at, created_at, updated_at FROM games WHERE external_id = $1
+`
+
+// Backs SyncPredictions: resolves CFBD's win-probability gameId against an
+// already-synced game, mirroring GetTeamByExternalID's role for teams.
+func (q *Queries) GetGameByExternalID(ctx context.Context, externalID string) (Game, error) {
+	row := q.db.QueryRow(ctx, getGameByExternalID, externalID)
+	var i Game
+	err := row.Scan(
+		&i.ID,
+		&i.ExternalID,
+		&i.WeekID,
+		&i.HomeTeamID,
+		&i.AwayTeamID,
+		&i.KickoffAt,
+		&i.Status,
+		&i.HomeScore,
+		&i.AwayScore,
+		&i.WinnerTeamID,
+		&i.GradedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getGameByIDWithTeams = `-- name: GetGameByIDWithTeams :one
 SELECT
     g.id, g.external_id, g.week_id, g.home_team_id, g.away_team_id, g.kickoff_at,

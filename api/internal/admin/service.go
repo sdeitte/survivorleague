@@ -106,6 +106,24 @@ func (s *Service) TriggerScheduleSync(ctx context.Context, triggeredBy pgtype.UU
 
 	result, syncErr := s.scheduleService.SyncSeason(ctx, seasonYear)
 
+	// Matchup-predictor data (win probability/spread, SP+ ratings) rides
+	// the same twice-daily cadence as the schedule sync above, but is
+	// deliberately best-effort and outside the sync_runs audit trail: it's
+	// a secondary, purely additive data source (see internal/schedule's
+	// SyncPredictions/SyncSPRatings doc comments) whose failure — CFBD
+	// being down, an unmatched team name — must never mark the core
+	// schedule sync itself as failed.
+	if predResult, err := s.scheduleService.SyncPredictions(ctx, seasonYear); err != nil {
+		log.Printf("admin: sync predictions (season_year=%d): %v", seasonYear, err)
+	} else {
+		log.Printf("admin: synced predictions (season_year=%d): upserted=%d skipped=%d", seasonYear, predResult.Upserted, predResult.Skipped)
+	}
+	if spResult, err := s.scheduleService.SyncSPRatings(ctx, seasonYear); err != nil {
+		log.Printf("admin: sync SP+ ratings (season_year=%d): %v", seasonYear, err)
+	} else {
+		log.Printf("admin: synced SP+ ratings (season_year=%d): upserted=%d skipped=%d", seasonYear, spResult.Upserted, spResult.Skipped)
+	}
+
 	status := "success"
 	var errText pgtype.Text
 	if syncErr != nil {

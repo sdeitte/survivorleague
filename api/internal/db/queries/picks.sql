@@ -124,3 +124,17 @@ LEFT JOIN picks p ON p.league_membership_id = m.id AND p.week_id = sqlc.arg(week
 LEFT JOIN games g ON g.id = p.game_id
 WHERE m.league_id = sqlc.arg(league_id) AND m.removed_at IS NULL
 ORDER BY u.display_name ASC;
+
+-- name: ListPickCountsForWeek :many
+-- Live per-team pick counts within one league's week — how many of this
+-- league's members currently have a pick committed to each team, right
+-- now, with no lock-status gating (shown as decision-support on the pick
+-- screen itself, not a post-lock reveal — see the matchup-stats/live
+-- pick-% feature). Scoped by league_id (not just week_id) since the same
+-- conference's week is shared across every league in it, and a percentage
+-- must only reflect the asking league's own members.
+SELECT p.team_id, count(*) AS pick_count
+FROM picks p
+JOIN league_memberships lm ON lm.id = p.league_membership_id
+WHERE lm.league_id = sqlc.arg(league_id) AND p.week_id = sqlc.arg(week_id)
+GROUP BY p.team_id;

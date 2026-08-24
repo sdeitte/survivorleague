@@ -437,6 +437,16 @@ type availableTeamResponse struct {
 	IsLocked        bool   `json:"is_locked"`
 	IsUsedElsewhere bool   `json:"is_used_elsewhere"`
 	IsCurrentPick   bool   `json:"is_current_pick"`
+
+	// Matchup-predictor decision-support data — see picks.AvailableTeam's
+	// doc comment. Not lock-gated (shown while a member is still
+	// deciding), and nullable since CFBD's win-probability model isn't
+	// published until close to kickoff.
+	WinProbability *float64 `json:"win_probability,omitempty"`
+	Spread         *float64 `json:"spread,omitempty"`
+	SPPlusRank     *int32   `json:"sp_plus_rank,omitempty"`
+	OpponentSPRank *int32   `json:"opponent_sp_plus_rank,omitempty"`
+	PickCount      int32    `json:"pick_count"`
 }
 
 // availableTeamsResponse is the full response of GET .../available-teams:

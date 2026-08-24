@@ -89,20 +89,36 @@ func (s *Service) GetPick(ctx context.Context, membershipID, weekID pgtype.UUID)
 // AvailableTeam is one row of GET .../available-teams: a pickable team in
 // the league's conference with a game this week, annotated with whether it
 // is locked (its game has kicked off) or already used elsewhere (committed
-// to a different week's pick row for this membership).
+// to a different week's pick row for this membership), plus decision-
+// support matchup data — win probability/spread when CFBD has published
+// it (nil otherwise, e.g. a week too far out — see internal/schedule's
+// SyncPredictions doc comment), SP+ rank as a fallback signal, and the
+// live pick count within this league. None of this is lock-gated: it's
+// shown as research while a member is deciding, not a post-lock reveal.
 type AvailableTeam struct {
 	Row             gen.ListAvailableTeamsForWeekRow
 	IsLocked        bool
 	IsUsedElsewhere bool
 	IsCurrentPick   bool
+
+	// WinProbability/Spread are this team's own perspective — CFBD reports
+	// both from the home team's perspective, negated here for the away
+	// team so a caller never has to know which side is home.
+	WinProbability *float64
+	Spread         *float64
+	SPRank         *int32 // this team's SP+ ranking, if synced
+	OpponentSPRank *int32
+	PickCount      int32 // how many of this league's members currently have this team picked for this week
 }
 
 // ListAvailableTeams returns every pickable team for the week (league's
 // conference, has a game that week) plus the membership's current pick for
 // that week. hasCurrentPick is false (and currentPick is the zero value)
 // when the membership hasn't picked for this week yet — that is not an
-// error condition here, unlike GetPick.
-func (s *Service) ListAvailableTeams(ctx context.Context, membershipID, weekID pgtype.UUID, conference string) (teams []AvailableTeam, currentPick gen.Pick, hasCurrentPick bool, err error) {
+// error condition here, unlike GetPick. leagueID scopes PickCount to this
+// league's own members (the same conference's week is shared across every
+// league in it); seasonYear scopes the SP+ rating lookup.
+func (s *Service) ListAvailableTeams(ctx context.Context, membershipID, leagueID, weekID pgtype.UUID, conference string, seasonYear int32) (teams []AvailableTeam, currentPick gen.Pick, hasCurrentPick bool, err error) {
 	rows, err := s.queries.ListAvailableTeamsForWeek(ctx, gen.ListAvailableTeamsForWeekParams{
 		WeekID:     weekID,
 		Conference: conference,
@@ -123,6 +139,38 @@ func (s *Service) ListAvailableTeams(ctx context.Context, membershipID, weekID p
 		used[id] = true
 	}
 
+	predictionRows, err := s.queries.ListGamePredictionsForWeek(ctx, weekID)
+	if err != nil {
+		return nil, gen.Pick{}, false, err
+	}
+	predictionByGame := make(map[pgtype.UUID]gen.GamePrediction, len(predictionRows))
+	for _, p := range predictionRows {
+		predictionByGame[p.GameID] = p
+	}
+
+	spRows, err := s.queries.ListTeamSPRatingsForSeason(ctx, seasonYear)
+	if err != nil {
+		return nil, gen.Pick{}, false, err
+	}
+	spRankByTeam := make(map[pgtype.UUID]int32, len(spRows))
+	for _, r := range spRows {
+		if r.Ranking.Valid {
+			spRankByTeam[r.TeamID] = r.Ranking.Int32
+		}
+	}
+
+	pickCountRows, err := s.queries.ListPickCountsForWeek(ctx, gen.ListPickCountsForWeekParams{
+		LeagueID: leagueID,
+		WeekID:   weekID,
+	})
+	if err != nil {
+		return nil, gen.Pick{}, false, err
+	}
+	pickCountByTeam := make(map[pgtype.UUID]int32, len(pickCountRows))
+	for _, r := range pickCountRows {
+		pickCountByTeam[r.TeamID] = int32(r.PickCount)
+	}
+
 	currentPick, getErr := s.GetPick(ctx, membershipID, weekID)
 	if getErr != nil && !errors.Is(getErr, ErrPickNotFound) {
 		return nil, gen.Pick{}, false, getErr
@@ -131,12 +179,36 @@ func (s *Service) ListAvailableTeams(ctx context.Context, membershipID, weekID p
 
 	out := make([]AvailableTeam, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, AvailableTeam{
+		at := AvailableTeam{
 			Row:             row,
 			IsLocked:        isKickedOff(row.KickoffAt),
 			IsUsedElsewhere: used[row.TeamID],
 			IsCurrentPick:   hasCurrentPick && currentPick.TeamID == row.TeamID,
-		})
+			PickCount:       pickCountByTeam[row.TeamID],
+		}
+		if rank, ok := spRankByTeam[row.TeamID]; ok {
+			at.SPRank = &rank
+		}
+		if rank, ok := spRankByTeam[row.OpponentTeamID]; ok {
+			at.OpponentSPRank = &rank
+		}
+		if pred, ok := predictionByGame[row.GameID]; ok {
+			if wp, err := pred.HomeWinProbability.Float64Value(); err == nil && wp.Valid {
+				v := wp.Float64
+				if !row.IsHome {
+					v = 1 - v
+				}
+				at.WinProbability = &v
+			}
+			if sp, err := pred.Spread.Float64Value(); err == nil && sp.Valid {
+				v := sp.Float64
+				if !row.IsHome {
+					v = -v
+				}
+				at.Spread = &v
+			}
+		}
+		out = append(out, at)
 	}
 	return out, currentPick, hasCurrentPick, nil
 }

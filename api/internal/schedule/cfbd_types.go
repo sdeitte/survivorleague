@@ -46,6 +46,28 @@ type cfbdGame struct {
 	AwayPoints   *int   `json:"awayPoints"`
 }
 
+// cfbdPregameWinProbability is CFBD's PregameWinProbability schema
+// (GET /metrics/wp/pregame), confirmed against the live OpenAPI spec.
+// spread/homeWinProbability are both from the home team's perspective —
+// callers normalize per-team at read time (see internal/picks/service.go).
+type cfbdPregameWinProbability struct {
+	GameID             int     `json:"gameId"`
+	HomeTeam           string  `json:"homeTeam"`
+	AwayTeam           string  `json:"awayTeam"`
+	Spread             float64 `json:"spread"`
+	HomeWinProbability float64 `json:"homeWinProbability"`
+}
+
+// cfbdTeamSP is CFBD's TeamSP schema (GET /ratings/sp), trimmed to the
+// fields this sync needs. CFBD's response always includes a synthetic
+// "nationalAverages" pseudo-team row with no real team behind it — callers
+// must skip it (see SyncSPRatings's doc comment in sync.go).
+type cfbdTeamSP struct {
+	Team    string  `json:"team"`
+	Rating  float64 `json:"rating"`
+	Ranking *int    `json:"ranking"`
+}
+
 // seasonTypeRegular is the only CFBD seasonType this phase syncs — see the
 // plan's Phase 3 scope ("season games (regular season)"). Postseason/bowl
 // games are out of scope for now; also, the `weeks` table has no seasonType

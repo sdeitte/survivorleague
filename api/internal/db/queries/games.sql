@@ -82,3 +82,8 @@ RETURNING *;
 -- against CFBD, not the joined team names GetGameByIDWithTeams carries for
 -- API responses.
 SELECT * FROM games WHERE id = sqlc.arg(id);
+
+-- name: GetGameByExternalID :one
+-- Backs SyncPredictions: resolves CFBD's win-probability gameId against an
+-- already-synced game, mirroring GetTeamByExternalID's role for teams.
+SELECT * FROM games WHERE external_id = sqlc.arg(external_id);

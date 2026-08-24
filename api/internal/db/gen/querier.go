@@ -111,6 +111,9 @@ type Querier interface {
 	// against CFBD, not the joined team names GetGameByIDWithTeams carries for
 	// API responses.
 	GetGame(ctx context.Context, id pgtype.UUID) (Game, error)
+	// Backs SyncPredictions: resolves CFBD's win-probability gameId against an
+	// already-synced game, mirroring GetTeamByExternalID's role for teams.
+	GetGameByExternalID(ctx context.Context, externalID string) (Game, error)
 	GetGameByIDWithTeams(ctx context.Context, id pgtype.UUID) (GetGameByIDWithTeamsRow, error)
 	// Phase 5: grading/elimination pipeline queries. See internal/grading's
 	// package doc comment for the full GradeGame/TryFinalizeLeagueWeek
@@ -122,6 +125,7 @@ type Querier interface {
 	// (graded_at now set), then sees GradedAt already valid and no-ops —
 	// exactly the "a re-fired poll can never double-grade" guarantee.
 	GetGameForGradingForUpdate(ctx context.Context, id pgtype.UUID) (Game, error)
+	GetGamePredictionByGameID(ctx context.Context, gameID pgtype.UUID) (GamePrediction, error)
 	GetLeagueByID(ctx context.Context, id pgtype.UUID) (League, error)
 	GetLeagueByInviteCode(ctx context.Context, inviteCode string) (League, error)
 	GetLeagueMembershipByID(ctx context.Context, id pgtype.UUID) (LeagueMembership, error)
@@ -172,6 +176,13 @@ type Querier interface {
 	// against teams already synced by the daily full sync.
 	GetTeamByExternalID(ctx context.Context, externalID string) (Team, error)
 	GetTeamByID(ctx context.Context, id pgtype.UUID) (Team, error)
+	// Backs SyncSPRatings: CFBD's /ratings/sp response identifies teams by
+	// name (not external_id, unlike every other CFBD endpoint this package
+	// consumes), so this is the one lookup keyed on name rather than
+	// external_id. A no-rows result is expected for CFBD's synthetic
+	// "nationalAverages" pseudo-team row — see cfbdTeamSP's doc comment.
+	GetTeamByName(ctx context.Context, name string) (Team, error)
+	GetTeamSPRating(ctx context.Context, arg GetTeamSPRatingParams) (TeamSpRating, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 	GetWeekByID(ctx context.Context, id pgtype.UUID) (Week, error)
@@ -242,6 +253,11 @@ type Querier interface {
 	// still-hardcoded canonical name list this filters against (used for CFBD
 	// normalization, not eligibility).
 	ListEligibleConferences(ctx context.Context, minTeams int32) ([]string, error)
+	// Every game_predictions row for games in the given week — merged onto
+	// ListAvailableTeamsForWeek's result in Go (internal/picks/service.go),
+	// not joined in SQL, so this stays a plain add-on next to the existing
+	// available-teams query rather than modifying it.
+	ListGamePredictionsForWeek(ctx context.Context, weekID pgtype.UUID) ([]GamePrediction, error)
 	// Joined with both teams' name/conference/logo so clients don't need N+1
 	// lookups per the GET /weeks/:id/games contract.
 	ListGamesByWeekWithTeams(ctx context.Context, weekID pgtype.UUID) ([]ListGamesByWeekWithTeamsRow, error)
@@ -292,6 +308,14 @@ type Querier interface {
 	// Test/verification + potential future admin-debugging helper: every
 	// outbox row for a user, newest first.
 	ListNotificationOutboxForUser(ctx context.Context, userID pgtype.UUID) ([]NotificationOutbox, error)
+	// Live per-team pick counts within one league's week — how many of this
+	// league's members currently have a pick committed to each team, right
+	// now, with no lock-status gating (shown as decision-support on the pick
+	// screen itself, not a post-lock reveal — see the matchup-stats/live
+	// pick-% feature). Scoped by league_id (not just week_id) since the same
+	// conference's week is shared across every league in it, and a percentage
+	// must only reflect the asking league's own members.
+	ListPickCountsForWeek(ctx context.Context, arg ListPickCountsForWeekParams) ([]ListPickCountsForWeekRow, error)
 	// Every week of the season for one membership (LEFT JOINed against that
 	// membership's pick, if any — a week with no pick still appears, with
 	// null pick/game/team/result/kickoff columns), with team/opponent names
@@ -309,6 +333,10 @@ type Querier interface {
 	// other members' not-yet-started picks), not this query.
 	ListPicksByWeekForLeague(ctx context.Context, arg ListPicksByWeekForLeagueParams) ([]ListPicksByWeekForLeagueRow, error)
 	ListSyncRuns(ctx context.Context, rowLimit int32) ([]SyncRun, error)
+	// Every synced team's SP+ rating for the season — fetched once per
+	// available-teams call and merged in Go (internal/picks/service.go) into
+	// a team_id -> rating map, rather than re-joining per row.
+	ListTeamSPRatingsForSeason(ctx context.Context, seasonYear int32) ([]TeamSpRating, error)
 	// conference is an optional exact-match filter: pass a NULL narg to list
 	// every team, or a canonical conference name to filter to it.
 	ListTeams(ctx context.Context, conference pgtype.Text) ([]Team, error)
@@ -419,6 +447,10 @@ type Querier interface {
 	// touch, so on conflict its existing value (NULL until Phase 5 grades the
 	// game) is left exactly as-is.
 	UpsertGame(ctx context.Context, arg UpsertGameParams) (Game, error)
+	// Match/upsert on game_id (UNIQUE) — see 00005_predictor_recap.sql's doc
+	// comment on why spread/home_win_probability are nullable and may be
+	// absent until CFBD publishes them close to kickoff.
+	UpsertGamePrediction(ctx context.Context, arg UpsertGamePredictionParams) (GamePrediction, error)
 	// Handles both fresh joins and rejoin-after-removal against the
 	// UNIQUE(league_id, user_id) constraint in one statement:
 	//   - no existing row                     -> plain INSERT.
@@ -460,6 +492,11 @@ type Querier interface {
 	// CFBD's raw string by internal/schedule's normalization table before this
 	// is ever called) — never CFBD's raw string.
 	UpsertTeam(ctx context.Context, arg UpsertTeamParams) (Team, error)
+	// Match/upsert on (team_id, season_year) per game_predictions' same
+	// upsert-per-sync-run contract. Callers must never pass CFBD's synthetic
+	// "nationalAverages" pseudo-team row — see internal/schedule/sync.go's
+	// SyncSPRatings doc comment.
+	UpsertTeamSPRating(ctx context.Context, arg UpsertTeamSPRatingParams) (TeamSpRating, error)
 	// Match/upsert on (season_year, week_number) per the Phase 3 sync
 	// contract. Weeks carry no other CFBD-sourced fields (the calendar
 	// endpoint's start/end dates aren't part of this schema — see the plan's

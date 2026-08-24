@@ -16,7 +16,7 @@ const getOrCreateNotificationPreferences = `-- name: GetOrCreateNotificationPref
 INSERT INTO notification_preferences (user_id)
 VALUES ($1)
 ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id
-RETURNING id, user_id, pick_reminder, eliminated, survived, mass_wipeout, buyback, email_enabled, push_enabled, created_at, updated_at
+RETURNING id, user_id, pick_reminder, eliminated, survived, mass_wipeout, buyback, email_enabled, push_enabled, created_at, updated_at, weekly_recap
 `
 
 // Phase 7: per-user notification preferences backing
@@ -46,6 +46,7 @@ func (q *Queries) GetOrCreateNotificationPreferences(ctx context.Context, userID
 		&i.PushEnabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.WeeklyRecap,
 	)
 	return i, err
 }
@@ -65,7 +66,7 @@ ON CONFLICT (user_id) DO UPDATE SET
     email_enabled = EXCLUDED.email_enabled,
     push_enabled  = EXCLUDED.push_enabled,
     updated_at    = now()
-RETURNING id, user_id, pick_reminder, eliminated, survived, mass_wipeout, buyback, email_enabled, push_enabled, created_at, updated_at
+RETURNING id, user_id, pick_reminder, eliminated, survived, mass_wipeout, buyback, email_enabled, push_enabled, created_at, updated_at, weekly_recap
 `
 
 type UpsertNotificationPreferencesParams struct {
@@ -107,6 +108,7 @@ func (q *Queries) UpsertNotificationPreferences(ctx context.Context, arg UpsertN
 		&i.PushEnabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.WeeklyRecap,
 	)
 	return i, err
 }

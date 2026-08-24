@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -21,6 +22,8 @@ type cfbdClient interface {
 	GetCalendar(ctx context.Context, year int) ([]cfbdCalendarWeek, error)
 	GetGames(ctx context.Context, year int) ([]cfbdGame, error)
 	GetGamesForWeek(ctx context.Context, year, week int) ([]cfbdGame, error)
+	GetPregameWinProbabilities(ctx context.Context, year int) ([]cfbdPregameWinProbability, error)
+	GetSPRatings(ctx context.Context, year int) ([]cfbdTeamSP, error)
 }
 
 var _ cfbdClient = (*CFBDClient)(nil)
@@ -266,6 +269,121 @@ func (s *Service) SyncSeason(ctx context.Context, year int) (SyncResult, error) 
 	}
 
 	return result, nil
+}
+
+// PredictionSyncResult summarizes one SyncPredictions run.
+type PredictionSyncResult struct {
+	Upserted int
+	// Skipped counts a prediction row whose gameId doesn't resolve to a
+	// game synced by SyncSeason — not an error, since CFBD's win-
+	// probability model can reference a game (e.g. a postseason/exhibition
+	// matchup) outside what SyncSeason ever pulls in.
+	Skipped int
+}
+
+// SyncPredictions pulls CFBD's pregame win-probability/spread model for
+// the whole season (GET /metrics/wp/pregame?year=) and upserts it into
+// game_predictions, keyed by matching CFBD's gameId to games.external_id.
+// Safe to call repeatedly (plain upsert on game_id) — called alongside
+// SyncSeason on the same twice-daily cron (see admin.Service.
+// TriggerScheduleSync), independently since CFBD only populates this data
+// in the ~1 week before kickoff, so most calls will only touch the
+// current/near-term weeks' rows regardless of how far the season has
+// progressed.
+func (s *Service) SyncPredictions(ctx context.Context, year int) (PredictionSyncResult, error) {
+	var result PredictionSyncResult
+
+	rows, err := s.cfbd.GetPregameWinProbabilities(ctx, year)
+	if err != nil {
+		return result, fmt.Errorf("schedule: get pregame win probabilities: %w", err)
+	}
+
+	for _, row := range rows {
+		game, err := s.queries.GetGameByExternalID(ctx, fmt.Sprint(row.GameID))
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				result.Skipped++
+				continue
+			}
+			return result, fmt.Errorf("schedule: get game for prediction %d: %w", row.GameID, err)
+		}
+
+		if _, err := s.queries.UpsertGamePrediction(ctx, gen.UpsertGamePredictionParams{
+			GameID:             game.ID,
+			Spread:             numericFromFloat64(row.Spread),
+			HomeWinProbability: numericFromFloat64(row.HomeWinProbability),
+		}); err != nil {
+			return result, fmt.Errorf("schedule: upsert prediction for game %d: %w", row.GameID, err)
+		}
+		result.Upserted++
+	}
+
+	return result, nil
+}
+
+// SPRatingSyncResult summarizes one SyncSPRatings run.
+type SPRatingSyncResult struct {
+	Upserted int
+	// Skipped counts a row that couldn't be matched to a synced team — CFBD's
+	// synthetic "nationalAverages" pseudo-team row always falls here (see
+	// cfbdTeamSP's doc comment), along with any real team name CFBD returns
+	// that doesn't match a currently-synced team.
+	Skipped int
+}
+
+// SyncSPRatings pulls CFBD's SP+ power ratings for the whole season
+// (GET /ratings/sp?year=) and upserts them into team_sp_ratings, keyed by
+// matching CFBD's team name to teams.name. Unlike SyncPredictions this is
+// available for the whole season up front, so a call early in the season
+// already populates every team's rating (which then just gets refreshed
+// on the same twice-daily cadence as everything else).
+func (s *Service) SyncSPRatings(ctx context.Context, year int) (SPRatingSyncResult, error) {
+	var result SPRatingSyncResult
+
+	rows, err := s.cfbd.GetSPRatings(ctx, year)
+	if err != nil {
+		return result, fmt.Errorf("schedule: get SP+ ratings: %w", err)
+	}
+
+	for _, row := range rows {
+		team, err := s.queries.GetTeamByName(ctx, row.Team)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				// Expected for CFBD's "nationalAverages" pseudo-team row,
+				// and harmless for any other unmatched name.
+				result.Skipped++
+				continue
+			}
+			return result, fmt.Errorf("schedule: get team %q for SP+ rating: %w", row.Team, err)
+		}
+
+		var ranking pgtype.Int4
+		if row.Ranking != nil {
+			ranking = pgtype.Int4{Int32: int32(*row.Ranking), Valid: true}
+		}
+		if _, err := s.queries.UpsertTeamSPRating(ctx, gen.UpsertTeamSPRatingParams{
+			TeamID:     team.ID,
+			SeasonYear: int32(year),
+			Rating:     numericFromFloat64(row.Rating),
+			Ranking:    ranking,
+		}); err != nil {
+			return result, fmt.Errorf("schedule: upsert SP+ rating for %q: %w", row.Team, err)
+		}
+		result.Upserted++
+	}
+
+	return result, nil
+}
+
+// numericFromFloat64 converts a plain float64 into a valid pgtype.Numeric
+// via its decimal text representation — pgtype.Numeric.Scan only accepts a
+// string (or nil), not a float64 directly.
+func numericFromFloat64(f float64) pgtype.Numeric {
+	var n pgtype.Numeric
+	// Scan's error return is only non-nil for a malformed string, which
+	// strconv.FormatFloat never produces.
+	_ = n.Scan(strconv.FormatFloat(f, 'f', -1, 64))
+	return n
 }
 
 // buildGameUpsertParams translates one CFBD game (already resolved to a

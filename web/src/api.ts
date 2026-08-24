@@ -225,6 +225,16 @@ export interface AvailableTeam {
   is_locked: boolean
   is_used_elsewhere: boolean
   is_current_pick: boolean
+  // Matchup-predictor decision-support data — shown while a member is
+  // still deciding, not lock-gated. win_probability/spread are absent
+  // until CFBD publishes them (usually within ~1 week of kickoff);
+  // sp_plus_rank/opponent_sp_plus_rank are the season-long fallback
+  // signal, available earlier.
+  win_probability?: number
+  spread?: number
+  sp_plus_rank?: number
+  opponent_sp_plus_rank?: number
+  pick_count: number
 }
 
 export interface AvailableTeamsResponse {

@@ -141,6 +141,51 @@ func (q *Queries) ListAvailableTeamsForWeek(ctx context.Context, arg ListAvailab
 	return items, nil
 }
 
+const listPickCountsForWeek = `-- name: ListPickCountsForWeek :many
+SELECT p.team_id, count(*) AS pick_count
+FROM picks p
+JOIN league_memberships lm ON lm.id = p.league_membership_id
+WHERE lm.league_id = $1 AND p.week_id = $2
+GROUP BY p.team_id
+`
+
+type ListPickCountsForWeekParams struct {
+	LeagueID pgtype.UUID `json:"league_id"`
+	WeekID   pgtype.UUID `json:"week_id"`
+}
+
+type ListPickCountsForWeekRow struct {
+	TeamID    pgtype.UUID `json:"team_id"`
+	PickCount int64       `json:"pick_count"`
+}
+
+// Live per-team pick counts within one league's week — how many of this
+// league's members currently have a pick committed to each team, right
+// now, with no lock-status gating (shown as decision-support on the pick
+// screen itself, not a post-lock reveal — see the matchup-stats/live
+// pick-% feature). Scoped by league_id (not just week_id) since the same
+// conference's week is shared across every league in it, and a percentage
+// must only reflect the asking league's own members.
+func (q *Queries) ListPickCountsForWeek(ctx context.Context, arg ListPickCountsForWeekParams) ([]ListPickCountsForWeekRow, error) {
+	rows, err := q.db.Query(ctx, listPickCountsForWeek, arg.LeagueID, arg.WeekID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPickCountsForWeekRow{}
+	for rows.Next() {
+		var i ListPickCountsForWeekRow
+		if err := rows.Scan(&i.TeamID, &i.PickCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPicksByMembershipForSeason = `-- name: ListPicksByMembershipForSeason :many
 SELECT
     w.id AS week_id,

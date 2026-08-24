@@ -53,6 +53,30 @@ func (q *Queries) GetTeamByID(ctx context.Context, id pgtype.UUID) (Team, error)
 	return i, err
 }
 
+const getTeamByName = `-- name: GetTeamByName :one
+SELECT id, external_id, name, conference, logo_url, created_at, updated_at FROM teams WHERE name = $1
+`
+
+// Backs SyncSPRatings: CFBD's /ratings/sp response identifies teams by
+// name (not external_id, unlike every other CFBD endpoint this package
+// consumes), so this is the one lookup keyed on name rather than
+// external_id. A no-rows result is expected for CFBD's synthetic
+// "nationalAverages" pseudo-team row — see cfbdTeamSP's doc comment.
+func (q *Queries) GetTeamByName(ctx context.Context, name string) (Team, error) {
+	row := q.db.QueryRow(ctx, getTeamByName, name)
+	var i Team
+	err := row.Scan(
+		&i.ID,
+		&i.ExternalID,
+		&i.Name,
+		&i.Conference,
+		&i.LogoUrl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listEligibleConferences = `-- name: ListEligibleConferences :many
 SELECT conference
 FROM teams
