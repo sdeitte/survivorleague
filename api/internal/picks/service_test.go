@@ -408,7 +408,7 @@ func TestService_ListAvailableTeams_LockedAndUsedFlags(t *testing.T) {
 		t.Fatalf("week1 pick: %v", err)
 	}
 
-	teams, currentPick, hasCurrentPick, err := f.env.picks.ListAvailableTeams(context.Background(), f.member.ID, f.league.ID, f.week2.ID, f.league.Conference, f.league.SeasonYear)
+	teams, currentPick, hasCurrentPick, err := f.env.picks.ListAvailableTeams(context.Background(), f.member.ID, f.week2.ID, f.league.Conference, f.league.SeasonYear)
 	if err != nil {
 		t.Fatalf("ListAvailableTeams (week2): %v", err)
 	}
@@ -435,7 +435,7 @@ func TestService_ListAvailableTeams_LockedAndUsedFlags(t *testing.T) {
 	// Now check week1's own list: teamA should show as the current pick,
 	// not locked (far-future kickoff), and NOT used-elsewhere (that flag
 	// only applies to OTHER weeks, not the week holding the pick itself).
-	teams1, currentPick1, hasCurrentPick1, err := f.env.picks.ListAvailableTeams(context.Background(), f.member.ID, f.league.ID, f.week1.ID, f.league.Conference, f.league.SeasonYear)
+	teams1, currentPick1, hasCurrentPick1, err := f.env.picks.ListAvailableTeams(context.Background(), f.member.ID, f.week1.ID, f.league.Conference, f.league.SeasonYear)
 	if err != nil {
 		t.Fatalf("ListAvailableTeams (week1): %v", err)
 	}
@@ -454,14 +454,15 @@ func TestService_ListAvailableTeams_LockedAndUsedFlags(t *testing.T) {
 	}
 }
 
-// TestService_ListAvailableTeams_MatchupStatsAndPickCounts covers the
-// matchup-predictor/live-pick-% merge: win probability and spread
-// normalized to each team's own perspective (CFBD reports both from the
-// home team's side), SP+ rank surfaced for both a team and its opponent,
-// and pick counts scoped to the asking league only — none of it lock- or
-// privacy-gated, per the feature's explicit "decision support while
-// deciding" design.
-func TestService_ListAvailableTeams_MatchupStatsAndPickCounts(t *testing.T) {
+// TestService_ListAvailableTeams_MatchupStats covers the matchup-predictor
+// merge: win probability and spread normalized to each team's own
+// perspective (CFBD reports both from the home team's side), and SP+ rank
+// surfaced for both a team and its opponent — none of it lock-gated, per
+// the feature's explicit "decision support while deciding" design.
+//
+// Deliberately does NOT cover a live pick count — that was removed as a
+// late-season fairness problem (see AvailableTeam's doc comment).
+func TestService_ListAvailableTeams_MatchupStats(t *testing.T) {
 	f := newFixture(t, 48*time.Hour)
 	ctx := context.Background()
 
@@ -485,31 +486,30 @@ func TestService_ListAvailableTeams_MatchupStatsAndPickCounts(t *testing.T) {
 	if _, err := f.env.picks.UpsertPick(ctx, f.member.ID, f.week1.ID, f.league.Conference, f.gameA1.ID, f.teamA.ID); err != nil {
 		t.Fatalf("commissioner's pick: %v", err)
 	}
-	otherUser := createTestUser(t, f.env.q, "other")
-	otherMember, err := f.env.leagues.JoinByCode(ctx, f.league.ID, otherUser.ID, "Test Team")
-	if err != nil {
-		t.Fatalf("JoinByCode: %v", err)
-	}
-	if _, err := f.env.picks.UpsertPick(ctx, otherMember.ID, f.week1.ID, f.league.Conference, f.gameA1.ID, f.teamA.ID); err != nil {
-		t.Fatalf("second member's pick: %v", err)
-	}
 
-	teams, _, _, err := f.env.picks.ListAvailableTeams(ctx, f.member.ID, f.league.ID, f.week1.ID, f.league.Conference, f.league.SeasonYear)
+	teams, _, _, err := f.env.picks.ListAvailableTeams(ctx, f.member.ID, f.week1.ID, f.league.Conference, f.league.SeasonYear)
 	if err != nil {
 		t.Fatalf("ListAvailableTeams: %v", err)
 	}
 
+	// Matched on (TeamID, GameID), not TeamID alone: oppX also appears in
+	// gameSec1 this week (see newFixture's doc comment on reusing its id),
+	// tied with gameA1 on both ORDER BY columns (same kickoff_at, same
+	// team name) — Postgres doesn't guarantee a stable order across ties,
+	// so matching on TeamID alone nondeterministically picked up oppX's
+	// unrelated gameSec1 row (no prediction set) instead of its gameA1 row
+	// on some runs, making this test flaky.
 	var teamA, oppX *AvailableTeam
 	for i := range teams {
-		switch teams[i].Row.TeamID {
-		case f.teamA.ID:
+		switch {
+		case teams[i].Row.TeamID == f.teamA.ID && teams[i].Row.GameID == f.gameA1.ID:
 			teamA = &teams[i]
-		case f.oppX.ID:
+		case teams[i].Row.TeamID == f.oppX.ID && teams[i].Row.GameID == f.gameA1.ID:
 			oppX = &teams[i]
 		}
 	}
 	if teamA == nil || oppX == nil {
-		t.Fatalf("expected both teamA and oppX rows, got %+v", teams)
+		t.Fatalf("expected both teamA and oppX rows for gameA1, got %+v", teams)
 	}
 
 	const epsilon = 1e-9
@@ -541,13 +541,6 @@ func TestService_ListAvailableTeams_MatchupStatsAndPickCounts(t *testing.T) {
 	}
 	if oppX.SPRank == nil || *oppX.SPRank != 60 {
 		t.Errorf("oppX.SPRank = %v, want 60", oppX.SPRank)
-	}
-
-	if teamA.PickCount != 2 {
-		t.Errorf("teamA.PickCount = %d, want 2 (both league members picked it)", teamA.PickCount)
-	}
-	if oppX.PickCount != 0 {
-		t.Errorf("oppX.PickCount = %d, want 0 (nobody picked it)", oppX.PickCount)
 	}
 }
 

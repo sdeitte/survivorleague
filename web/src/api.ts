@@ -227,7 +227,6 @@ export interface AvailableTeam {
   spread?: number
   sp_plus_rank?: number
   opponent_sp_plus_rank?: number
-  pick_count: number
 }
 
 export interface AvailableTeamsResponse {

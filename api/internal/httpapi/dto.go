@@ -515,7 +515,6 @@ type availableTeamResponse struct {
 	Spread         *float64 `json:"spread,omitempty"`
 	SPPlusRank     *int32   `json:"sp_plus_rank,omitempty"`
 	OpponentSPRank *int32   `json:"opponent_sp_plus_rank,omitempty"`
-	PickCount      int32    `json:"pick_count"`
 }
 
 // availableTeamsResponse is the full response of GET .../available-teams:

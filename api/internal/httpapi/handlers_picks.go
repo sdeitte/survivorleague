@@ -159,7 +159,7 @@ func (a *API) handleListAvailableTeams(w http.ResponseWriter, r *http.Request) {
 	}
 	weekID, _ := db.ParseUUID(weekIDStr)
 
-	teams, currentPick, hasCurrentPick, err := a.picksService.ListAvailableTeams(r.Context(), lc.Membership.ID, lc.League.ID, weekID, lc.League.Conference, lc.League.SeasonYear)
+	teams, currentPick, hasCurrentPick, err := a.picksService.ListAvailableTeams(r.Context(), lc.Membership.ID, weekID, lc.League.Conference, lc.League.SeasonYear)
 	if err != nil {
 		log.Printf("list available teams: %v", err)
 		writeError(w, http.StatusInternalServerError, "failed to list available teams")
@@ -186,7 +186,6 @@ func (a *API) handleListAvailableTeams(w http.ResponseWriter, r *http.Request) {
 			Spread:          t.Spread,
 			SPPlusRank:      t.SPRank,
 			OpponentSPRank:  t.OpponentSPRank,
-			PickCount:       t.PickCount,
 		})
 		// The current pick's team is always one of this week's available
 		// teams (its game was validated to belong to this week and its
