@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -51,11 +52,21 @@ var (
 	// ErrTeamNameTooLong is returned when a trimmed team name exceeds
 	// maxTeamNameLength.
 	ErrTeamNameTooLong = errors.New("leagues: team name too long")
+	// ErrBuyBackWindowClosed is returned by BuyBackMember once the
+	// league's traditional buy-back cutoff has passed — see
+	// buyBackCutoffWeekNumber.
+	ErrBuyBackWindowClosed = errors.New("leagues: buy-backs are no longer allowed once the cutoff week's games have begun")
 )
 
 // maxTeamNameLength is a sanity cap, not a design constraint — mirrors
 // internal/chat's identical reasoning for its own message-length cap.
 const maxTeamNameLength = 60
+
+// buyBackCutoffWeekNumber is the commissioner's traditional buy-back
+// deadline: a buy-back is only allowed up until this week's first game
+// kicks off, after which the lifeline is off the table for the rest of
+// the season regardless of when a member was eliminated.
+const buyBackCutoffWeekNumber = 5
 
 // validateTeamName trims and validates a team name, shared by
 // CreateLeague, JoinByCode, and UpdateTeamName so the same rule can never
@@ -186,6 +197,30 @@ func (s *Service) GetLeagueByID(ctx context.Context, id pgtype.UUID) (gen.League
 		return gen.League{}, err
 	}
 	return league, nil
+}
+
+// IsSeasonComplete reports whether every conference-relevant game synced
+// for leagueID's own season/conference has reached exactly 'final' — the
+// same terminal-status bar internal/grading.TryFinalizeLeagueWeek applies
+// per week, just checked across the whole season at once. Drives the
+// frontend's co-champions banner: per the product's confirmed tiebreaker
+// rule, a season that ends with more than one contestant still active
+// makes them all co-champions rather than triggering a sudden-death
+// week. Returns false (not complete) whenever no games are synced yet at
+// all for this season/conference — "no data" is never "season over."
+func (s *Service) IsSeasonComplete(ctx context.Context, leagueID pgtype.UUID) (bool, error) {
+	league, err := s.GetLeagueByID(ctx, leagueID)
+	if err != nil {
+		return false, err
+	}
+	counts, err := s.queries.CountUnfinishedConferenceGamesForSeason(ctx, gen.CountUnfinishedConferenceGamesForSeasonParams{
+		SeasonYear: league.SeasonYear,
+		Conference: league.Conference,
+	})
+	if err != nil {
+		return false, err
+	}
+	return counts.Total > 0 && counts.Unfinished == 0, nil
 }
 
 // GetLeagueByInviteCode looks up a league by its current invite code,
@@ -368,6 +403,14 @@ func (s *Service) UpdateTeamName(ctx context.Context, leagueID, userID pgtype.UU
 //     otherwise — buy-back is one-time-ever, checked against this flag,
 //     not current status, so a second elimination after a buy-back never
 //     grants a second one).
+//  4. the league's traditional buy-back window (before
+//     buyBackCutoffWeekNumber's first kickoff) hasn't closed yet
+//     (ErrBuyBackWindowClosed otherwise) — checked against the league's
+//     own season/conference schedule, not wall-clock week numbers, so it
+//     lines up exactly with when that league's members actually see week
+//     5 games lock. A season/conference with no synced week-5 schedule
+//     data yet is treated as still open, same permissive default as
+//     internal/schedule's IsFirstWeekPickableForConference.
 //
 // On success, updates status/bought_back/bought_back_at/bought_back_by in
 // one statement (BuyBackMembership's WHERE guard also protects against a
@@ -393,6 +436,18 @@ func (s *Service) BuyBackMember(ctx context.Context, leagueID, membershipID, act
 	}
 	if current.BoughtBack {
 		return gen.LeagueMembership{}, ErrAlreadyBoughtBack
+	}
+
+	league, err := s.GetLeagueByID(ctx, leagueID)
+	if err != nil {
+		return gen.LeagueMembership{}, err
+	}
+	open, err := s.isBuyBackWindowOpen(ctx, league.SeasonYear, league.Conference)
+	if err != nil {
+		return gen.LeagueMembership{}, err
+	}
+	if !open {
+		return gen.LeagueMembership{}, ErrBuyBackWindowClosed
 	}
 
 	updated, err := s.queries.BuyBackMembership(ctx, gen.BuyBackMembershipParams{
@@ -446,6 +501,28 @@ func (s *Service) BuyBackMember(ctx context.Context, leagueID, membershipID, act
 	}
 
 	return updated, nil
+}
+
+// isBuyBackWindowOpen reports whether buyBackCutoffWeekNumber's first game
+// (for this season/conference) has yet to kick off, as of now. No synced
+// schedule data for that week (season hasn't reached it yet, or hasn't
+// been synced) is treated as still open — never block a commissioner
+// action for a reason nobody could see coming, same call as
+// internal/schedule's IsFirstWeekPickableForConference.
+func (s *Service) isBuyBackWindowOpen(ctx context.Context, seasonYear int32, conference string) (bool, error) {
+	rows, err := s.queries.ListWeekKickoffRangesForConference(ctx, gen.ListWeekKickoffRangesForConferenceParams{
+		SeasonYear: seasonYear,
+		Conference: conference,
+	})
+	if err != nil {
+		return false, err
+	}
+	for _, r := range rows {
+		if r.WeekNumber == buyBackCutoffWeekNumber {
+			return time.Now().Before(r.MinKickoff.Time), nil
+		}
+	}
+	return true, nil
 }
 
 // CloseLeague closes a league: sets status='closed'. This is NOT a

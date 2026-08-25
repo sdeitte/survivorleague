@@ -161,6 +161,15 @@ type leagueResponse struct {
 	Status             string            `json:"status"`
 	CreatedAt          string            `json:"created_at"`
 	Membership         membershipSummary `json:"membership"`
+
+	// SeasonComplete is set only by handleGetLeague (every other
+	// toLeagueResponse caller leaves it false) — true once every
+	// conference-relevant game for this league's season has reached
+	// 'final', per leagues.Service.IsSeasonComplete. Drives the frontend's
+	// co-champions banner: the tiebreaker rule is "co-champions" for
+	// however many contestants are still active once the season is over,
+	// rather than a sudden-death week.
+	SeasonComplete bool `json:"season_complete,omitempty"`
 }
 
 func toLeagueResponse(league gen.League, membershipID pgtype.UUID, role string, isContestant bool, status string, teamName pgtype.Text) leagueResponse {

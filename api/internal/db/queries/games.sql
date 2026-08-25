@@ -87,3 +87,25 @@ SELECT * FROM games WHERE id = sqlc.arg(id);
 -- Backs SyncPredictions: resolves CFBD's win-probability gameId against an
 -- already-synced game, mirroring GetTeamByExternalID's role for teams.
 SELECT * FROM games WHERE external_id = sqlc.arg(external_id);
+
+-- name: CountUnfinishedConferenceGamesForSeason :one
+-- Backs leagues.Service.IsSeasonComplete (the co-champions tiebreaker
+-- banner): every conference-relevant game for a season (either team
+-- belongs to conference — same relevance rule as
+-- ListConferenceRelevantGamesForWeek) that hasn't reached exactly
+-- 'final'. Deliberately as strict as TryFinalizeLeagueWeek's own
+-- per-week check (postponed/canceled count as unfinished, not
+-- terminal) — the season isn't "over" for this purpose if grading
+-- itself is still stuck waiting on one of these games. total lets the
+-- caller distinguish "0 unfinished because the season is done" from "0
+-- unfinished because nothing is synced yet" — only the former means
+-- the season is actually complete.
+SELECT
+    COUNT(*) FILTER (WHERE g.status != 'final') AS unfinished,
+    COUNT(*) AS total
+FROM games g
+JOIN weeks w ON w.id = g.week_id
+JOIN teams ht ON ht.id = g.home_team_id
+JOIN teams at2 ON at2.id = g.away_team_id
+WHERE w.season_year = sqlc.arg(season_year)
+  AND (ht.conference = sqlc.arg(conference) OR at2.conference = sqlc.arg(conference));

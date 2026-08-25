@@ -11,6 +11,46 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countUnfinishedConferenceGamesForSeason = `-- name: CountUnfinishedConferenceGamesForSeason :one
+SELECT
+    COUNT(*) FILTER (WHERE g.status != 'final') AS unfinished,
+    COUNT(*) AS total
+FROM games g
+JOIN weeks w ON w.id = g.week_id
+JOIN teams ht ON ht.id = g.home_team_id
+JOIN teams at2 ON at2.id = g.away_team_id
+WHERE w.season_year = $1
+  AND (ht.conference = $2 OR at2.conference = $2)
+`
+
+type CountUnfinishedConferenceGamesForSeasonParams struct {
+	SeasonYear int32  `json:"season_year"`
+	Conference string `json:"conference"`
+}
+
+type CountUnfinishedConferenceGamesForSeasonRow struct {
+	Unfinished int64 `json:"unfinished"`
+	Total      int64 `json:"total"`
+}
+
+// Backs leagues.Service.IsSeasonComplete (the co-champions tiebreaker
+// banner): every conference-relevant game for a season (either team
+// belongs to conference — same relevance rule as
+// ListConferenceRelevantGamesForWeek) that hasn't reached exactly
+// 'final'. Deliberately as strict as TryFinalizeLeagueWeek's own
+// per-week check (postponed/canceled count as unfinished, not
+// terminal) — the season isn't "over" for this purpose if grading
+// itself is still stuck waiting on one of these games. total lets the
+// caller distinguish "0 unfinished because the season is done" from "0
+// unfinished because nothing is synced yet" — only the former means
+// the season is actually complete.
+func (q *Queries) CountUnfinishedConferenceGamesForSeason(ctx context.Context, arg CountUnfinishedConferenceGamesForSeasonParams) (CountUnfinishedConferenceGamesForSeasonRow, error) {
+	row := q.db.QueryRow(ctx, countUnfinishedConferenceGamesForSeason, arg.SeasonYear, arg.Conference)
+	var i CountUnfinishedConferenceGamesForSeasonRow
+	err := row.Scan(&i.Unfinished, &i.Total)
+	return i, err
+}
+
 const getGame = `-- name: GetGame :one
 SELECT id, external_id, week_id, home_team_id, away_team_id, kickoff_at, status, home_score, away_score, winner_team_id, graded_at, created_at, updated_at FROM games WHERE id = $1
 `

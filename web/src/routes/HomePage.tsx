@@ -72,6 +72,9 @@ export function HomePage() {
             Signed in as <span className="text-slate-200">{user?.display_name}</span>
           </p>
           <div className="flex items-center gap-3">
+            <Link to="/how-to-play" className="text-xs text-slate-500 underline">
+              How to Play
+            </Link>
             <Link to="/settings" className="text-xs text-slate-500 underline">
               Settings
             </Link>

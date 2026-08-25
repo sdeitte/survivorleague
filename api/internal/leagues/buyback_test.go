@@ -3,6 +3,7 @@ package leagues
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -191,5 +192,92 @@ func TestService_BuyBackMember_RejectsSecondBuyBackAfterReElimination(t *testing
 	}
 	if fresh.Status != "eliminated" {
 		t.Errorf("Status = %q after a rejected second buy-back attempt, want unchanged %q", fresh.Status, "eliminated")
+	}
+}
+
+// cutoffWeekGame creates a single week-5 game for seasonYear/conference
+// with the given kickoff time — everything BuyBackMember's window check
+// needs from the schedule, without pulling in internal/picks' full
+// fixture (a different package, and overkill for one game).
+func cutoffWeekGame(t *testing.T, q *gen.Queries, seasonYear int32, conference string, kickoffAt time.Time) {
+	t.Helper()
+	week5, err := q.UpsertWeek(context.Background(), gen.UpsertWeekParams{SeasonYear: seasonYear, WeekNumber: buyBackCutoffWeekNumber})
+	if err != nil {
+		t.Fatalf("UpsertWeek (week 5): %v", err)
+	}
+	id := time.Now().UnixNano()
+	home, err := q.UpsertTeam(context.Background(), gen.UpsertTeamParams{
+		ExternalID: fmt.Sprintf("cutoff-home-%d", id), Name: fmt.Sprintf("Cutoff Home %d", id), Conference: conference,
+	})
+	if err != nil {
+		t.Fatalf("UpsertTeam (home): %v", err)
+	}
+	away, err := q.UpsertTeam(context.Background(), gen.UpsertTeamParams{
+		ExternalID: fmt.Sprintf("cutoff-away-%d", id), Name: fmt.Sprintf("Cutoff Away %d", id), Conference: conference,
+	})
+	if err != nil {
+		t.Fatalf("UpsertTeam (away): %v", err)
+	}
+	if _, err := q.UpsertGame(context.Background(), gen.UpsertGameParams{
+		ExternalID: fmt.Sprintf("cutoff-game-%d", id), WeekID: week5.ID, HomeTeamID: home.ID, AwayTeamID: away.ID,
+		KickoffAt: pgtype.Timestamptz{Time: kickoffAt, Valid: true}, Status: "scheduled",
+	}); err != nil {
+		t.Fatalf("UpsertGame (week 5): %v", err)
+	}
+}
+
+// TestService_BuyBackMember_RejectsAfterCutoffWeekKickoff confirms the
+// commissioner's traditional buy-back deadline: once week 5's first game
+// has kicked off (for the league's own season/conference), the lifeline is
+// off the table for the rest of the season regardless of when the target
+// member was eliminated.
+func TestService_BuyBackMember_RejectsAfterCutoffWeekKickoff(t *testing.T) {
+	s, q := newTestService(t)
+	commissioner := createTestUser(t, q, "commish")
+	player := createTestUser(t, q, "player")
+
+	seasonYear := int32(97000 + int(time.Now().UnixNano()%1000))
+	league, _, err := s.CreateLeague(context.Background(), commissioner.ID, "Cutoff Test League", seasonYear, "Big Ten", "Test Team")
+	if err != nil {
+		t.Fatalf("CreateLeague: %v", err)
+	}
+	m, err := s.JoinByCode(context.Background(), league.ID, player.ID, "Test Team")
+	if err != nil {
+		t.Fatalf("JoinByCode: %v", err)
+	}
+	week1 := testWeek(t, q, 1)
+	eliminateTestMembership(t, q, week1, m.ID)
+
+	cutoffWeekGame(t, q, seasonYear, "Big Ten", time.Now().Add(-1*time.Hour))
+
+	if _, err := s.BuyBackMember(context.Background(), league.ID, m.ID, commissioner.ID); !errors.Is(err, ErrBuyBackWindowClosed) {
+		t.Fatalf("BuyBackMember after week 5 kickoff: got err %v, want %v", err, ErrBuyBackWindowClosed)
+	}
+}
+
+// TestService_BuyBackMember_AllowedBeforeCutoffWeekKickoff is the boundary
+// case's other side: week 5's schedule exists but hasn't kicked off yet, so
+// the buy-back must still succeed.
+func TestService_BuyBackMember_AllowedBeforeCutoffWeekKickoff(t *testing.T) {
+	s, q := newTestService(t)
+	commissioner := createTestUser(t, q, "commish")
+	player := createTestUser(t, q, "player")
+
+	seasonYear := int32(98000 + int(time.Now().UnixNano()%1000))
+	league, _, err := s.CreateLeague(context.Background(), commissioner.ID, "Pre-Cutoff Test League", seasonYear, "Big Ten", "Test Team")
+	if err != nil {
+		t.Fatalf("CreateLeague: %v", err)
+	}
+	m, err := s.JoinByCode(context.Background(), league.ID, player.ID, "Test Team")
+	if err != nil {
+		t.Fatalf("JoinByCode: %v", err)
+	}
+	week1 := testWeek(t, q, 1)
+	eliminateTestMembership(t, q, week1, m.ID)
+
+	cutoffWeekGame(t, q, seasonYear, "Big Ten", time.Now().Add(1*time.Hour))
+
+	if _, err := s.BuyBackMember(context.Background(), league.ID, m.ID, commissioner.ID); err != nil {
+		t.Fatalf("BuyBackMember before week 5 kickoff: %v", err)
 	}
 }

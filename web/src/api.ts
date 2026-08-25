@@ -137,6 +137,12 @@ export interface League {
   status: 'active' | 'closed'
   created_at: string
   membership: MembershipSummary
+  // Only ever set by GET /leagues/:id (other league responses omit it) —
+  // true once every conference-relevant game this season has finished.
+  // Drives the co-champions banner: per the tiebreaker rule, everyone
+  // still active when the season ends is a co-champion rather than
+  // there being a sudden-death week.
+  season_complete?: boolean
 }
 
 // Membership is the full record returned by the buy-back endpoint —

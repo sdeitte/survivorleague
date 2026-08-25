@@ -47,6 +47,18 @@ type Querier interface {
 	// Test/verification helper — lets integration tests assert "N rows
 	// enqueued" without reaching for raw SQL.
 	CountPendingNotifications(ctx context.Context) (int64, error)
+	// Backs leagues.Service.IsSeasonComplete (the co-champions tiebreaker
+	// banner): every conference-relevant game for a season (either team
+	// belongs to conference — same relevance rule as
+	// ListConferenceRelevantGamesForWeek) that hasn't reached exactly
+	// 'final'. Deliberately as strict as TryFinalizeLeagueWeek's own
+	// per-week check (postponed/canceled count as unfinished, not
+	// terminal) — the season isn't "over" for this purpose if grading
+	// itself is still stuck waiting on one of these games. total lets the
+	// caller distinguish "0 unfinished because the season is done" from "0
+	// unfinished because nothing is synced yet" — only the former means
+	// the season is actually complete.
+	CountUnfinishedConferenceGamesForSeason(ctx context.Context, arg CountUnfinishedConferenceGamesForSeasonParams) (CountUnfinishedConferenceGamesForSeasonRow, error)
 	CountUsersAdmin(ctx context.Context) (int64, error)
 	// Every commissioner/admin privileged action writes a row here per the
 	// plan's Data Model section. league_id/target_type/target_id are nullable

@@ -197,6 +197,15 @@ export function LeagueDetailPage() {
   const inviteJoinable = inviteQuery.data?.joinable ?? true
   const closePhrase = `I want to close ${league.name}`
 
+  // Co-champions tiebreaker: once the season is fully over (every
+  // conference-relevant game final — see league.season_complete's doc
+  // comment on the API side), everyone still active shares the title
+  // rather than there being a sudden-death week. A single remaining
+  // active member is just "the champion" — still worth calling out, but
+  // not a tie.
+  const activeMembers = membersQuery.data?.filter((m) => m.status === 'active') ?? []
+  const champions = league.season_complete ? activeMembers : []
+
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 p-6">
       <div className="max-w-lg mx-auto space-y-4">
@@ -204,9 +213,29 @@ export function LeagueDetailPage() {
           <BrandWordmark size={200} />
         </div>
 
-        <Link to="/" className="text-xs text-slate-500 underline">
-          ← My Leagues
-        </Link>
+        <div className="flex items-center justify-between">
+          <Link to="/" className="text-xs text-slate-500 underline">
+            ← My Leagues
+          </Link>
+          <Link to="/how-to-play" className="text-xs text-slate-500 underline">
+            How to Play
+          </Link>
+        </div>
+
+        {champions.length > 0 && (
+          <div className="rounded-xl border border-amber-600/60 bg-amber-950/30 p-4">
+            <p className="text-sm text-amber-200 font-medium">
+              {champions.length === 1 ? 'Champion' : 'Co-Champions'}
+            </p>
+            <p className="text-xs text-amber-300/80 mt-0.5">
+              {champions.length === 1
+                ? `The season is over — ${champions[0].team_name || champions[0].display_name} is the last one standing.`
+                : `The season is over with ${champions.length} players still standing — ${champions
+                    .map((m) => m.team_name || m.display_name)
+                    .join(', ')} share the title.`}
+            </p>
+          </div>
+        )}
 
         {isClosed && (
           <div className="rounded-xl border border-amber-800/60 bg-amber-950/40 p-4">

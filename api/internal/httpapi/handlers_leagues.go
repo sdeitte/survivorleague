@@ -133,7 +133,14 @@ func (a *API) handleGetLeague(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "not a member of this league")
 		return
 	}
-	writeJSON(w, http.StatusOK, toLeagueResponse(lc.League, lc.Membership.ID, lc.Membership.Role, lc.Membership.IsContestant, lc.Membership.Status, lc.Membership.TeamName))
+	resp := toLeagueResponse(lc.League, lc.Membership.ID, lc.Membership.Role, lc.Membership.IsContestant, lc.Membership.Status, lc.Membership.TeamName)
+	seasonComplete, err := a.leaguesService.IsSeasonComplete(r.Context(), lc.League.ID)
+	if err != nil {
+		log.Printf("get league: check season complete: %v", err)
+	} else {
+		resp.SeasonComplete = seasonComplete
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleUpdateLeague implements PATCH /leagues/:id. `name` renames the
@@ -453,6 +460,9 @@ func (a *API) handleBuyBackMember(w http.ResponseWriter, r *http.Request) {
 			return
 		case errors.Is(err, leagues.ErrAlreadyBoughtBack):
 			writeError(w, http.StatusConflict, "member has already used their one-time buy-back")
+			return
+		case errors.Is(err, leagues.ErrBuyBackWindowClosed):
+			writeError(w, http.StatusConflict, "buy-backs are no longer allowed — the cutoff week's games have already begun")
 			return
 		}
 		log.Printf("buy back member: %v", err)
