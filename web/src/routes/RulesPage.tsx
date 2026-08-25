@@ -59,18 +59,6 @@ export function RulesPage() {
         </section>
 
         <section className="space-y-2 text-sm text-slate-300">
-          <h2 className="text-base font-semibold text-slate-100">Buy-back</h2>
-          <p>
-            Your commissioner can reinstate one eliminated player as a one-time lifeline — it can only ever be used
-            once per player for the whole season, even if they're eliminated again later.
-          </p>
-          <p>
-            Buy-backs are only allowed before Week 5's games kick off. Once that window closes, an elimination is
-            final for the rest of the season.
-          </p>
-        </section>
-
-        <section className="space-y-2 text-sm text-slate-300">
           <h2 className="text-base font-semibold text-slate-100">If more than one player survives to the end</h2>
           <p>
             There's no sudden-death tiebreaker. If the season ends with more than one player still alive, they're
@@ -92,14 +80,6 @@ export function RulesPage() {
           <p>
             Every league has a chat for trash talk. Messages are visible for 7 days, and your commissioner can
             delete any message.
-          </p>
-        </section>
-
-        <section className="space-y-2 text-sm text-slate-300">
-          <h2 className="text-base font-semibold text-slate-100">Closing a league</h2>
-          <p>
-            Once your commissioner closes the league, no more picks, joins, or changes can be made — the league
-            and its full history stay saved for everyone to look back on.
           </p>
         </section>
       </div>
