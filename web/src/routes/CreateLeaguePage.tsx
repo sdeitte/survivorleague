@@ -115,6 +115,19 @@ export function CreateLeaguePage() {
             <p className="text-xs text-slate-500 mt-1">Locked for the league's lifetime once created.</p>
           </div>
 
+          <div>
+            <label htmlFor="team_name" className="block text-sm text-slate-300 mb-1">
+              Your team name
+            </label>
+            <input
+              id="team_name"
+              type="text"
+              className="w-full rounded-md bg-slate-800 border border-slate-700 px-3 py-1.5 text-sm text-slate-100"
+              {...register('team_name')}
+            />
+            {errors.team_name && <p className="text-red-400 text-xs mt-1">{errors.team_name.message}</p>}
+          </div>
+
           {serverError && <p className="text-red-400 text-sm">{serverError}</p>}
 
           <button

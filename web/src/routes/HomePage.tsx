@@ -71,9 +71,14 @@ export function HomePage() {
           <p className="text-sm text-slate-500">
             Signed in as <span className="text-slate-200">{user?.display_name}</span>
           </p>
-          <button type="button" onClick={() => void logout()} className="text-xs text-slate-500 underline">
-            Log out
-          </button>
+          <div className="flex items-center gap-3">
+            <Link to="/settings" className="text-xs text-slate-500 underline">
+              Settings
+            </Link>
+            <button type="button" onClick={() => void logout()} className="text-xs text-slate-500 underline">
+              Log out
+            </button>
+          </div>
         </div>
 
         {user && user.email_verified_at === null && <VerifyEmailBanner />}

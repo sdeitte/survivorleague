@@ -107,7 +107,7 @@ func TestService_GenerateWeekRecap_StoresAndRetrieves(t *testing.T) {
 	leaguesSvc := leagues.NewService(q, pool)
 
 	commissioner := createRecapTestUser(t, q, "commish")
-	league, _, err := leaguesSvc.CreateLeague(ctx, commissioner.ID, "Recap Test League", 2026, "Big Ten")
+	league, _, err := leaguesSvc.CreateLeague(ctx, commissioner.ID, "Recap Test League", 2026, "Big Ten", "Test Team")
 	if err != nil {
 		t.Fatalf("CreateLeague: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestService_GetLatestRecap_NoneYet(t *testing.T) {
 	leaguesSvc := leagues.NewService(q, pool)
 
 	commissioner := createRecapTestUser(t, q, "commish")
-	league, _, err := leaguesSvc.CreateLeague(ctx, commissioner.ID, "No Recap Yet League", 2026, "SEC")
+	league, _, err := leaguesSvc.CreateLeague(ctx, commissioner.ID, "No Recap Yet League", 2026, "SEC", "Test Team")
 	if err != nil {
 		t.Fatalf("CreateLeague: %v", err)
 	}

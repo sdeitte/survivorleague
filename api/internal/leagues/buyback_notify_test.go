@@ -69,7 +69,7 @@ func TestBuyBackMember_NotifiesReinstatedPlayer(t *testing.T) {
 	player := createTestUser(t, q, "player")
 	league, _ := createTestLeague(t, s, commissioner)
 
-	m, err := s.JoinByCode(context.Background(), league.ID, player.ID)
+	m, err := s.JoinByCode(context.Background(), league.ID, player.ID, "Test Team")
 	if err != nil {
 		t.Fatalf("JoinByCode: %v", err)
 	}

@@ -5,7 +5,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { BrandWordmark } from '../components/BrandWordmark'
 import { previewInvite, joinLeagueByCode, ApiError, type InvitePreviewResponse } from '../api'
-import { joinCodeSchema, type JoinCodeFormValues } from '../leagues/schemas'
+import { joinCodeSchema, confirmJoinSchema, type JoinCodeFormValues, type ConfirmJoinFormValues } from '../leagues/schemas'
 
 // Enter a code -> preview the league it invites to -> confirm -> join ->
 // navigate to the league. Two steps in one component (rather than two
@@ -37,6 +37,12 @@ export function JoinLeaguePage() {
     formState: { errors, isSubmitting },
   } = useForm<JoinCodeFormValues>({ resolver: zodResolver(joinCodeSchema) })
 
+  const {
+    register: registerJoin,
+    handleSubmit: handleJoinSubmit,
+    formState: { errors: joinErrors },
+  } = useForm<ConfirmJoinFormValues>({ resolver: zodResolver(confirmJoinSchema) })
+
   const onPreview = async (values: JoinCodeFormValues) => {
     setServerError(null)
     try {
@@ -58,12 +64,12 @@ export function JoinLeaguePage() {
     if (code) void onPreview({ code })
   }, [searchParams])
 
-  const onConfirmJoin = async () => {
+  const onConfirmJoin = async (values: ConfirmJoinFormValues) => {
     if (!preview) return
     setServerError(null)
     setIsJoining(true)
     try {
-      const league = await joinLeagueByCode(preview.code)
+      const league = await joinLeagueByCode(preview.code, values.team_name)
       navigate(`/leagues/${league.id}`, { replace: true })
     } catch (err) {
       setServerError(
@@ -147,26 +153,39 @@ export function JoinLeaguePage() {
             ) : authLoading ? (
               <p className="text-sm text-slate-500 text-center">Loading…</p>
             ) : user ? (
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPreview(null)
-                    setServerError(null)
-                  }}
-                  className="flex-1 rounded-md border border-slate-700 px-3 py-1.5 text-sm text-slate-100"
-                >
-                  Back
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void onConfirmJoin()}
-                  disabled={isJoining}
-                  className="flex-1 rounded-md bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-900 disabled:opacity-50"
-                >
-                  {isJoining ? 'Joining…' : 'Join league'}
-                </button>
-              </div>
+              <form onSubmit={handleJoinSubmit(onConfirmJoin)} className="space-y-3" noValidate>
+                <div>
+                  <label htmlFor="join_team_name" className="block text-sm text-slate-300 mb-1">
+                    Your team name
+                  </label>
+                  <input
+                    id="join_team_name"
+                    type="text"
+                    className="w-full rounded-md bg-slate-800 border border-slate-700 px-3 py-1.5 text-sm text-slate-100"
+                    {...registerJoin('team_name')}
+                  />
+                  {joinErrors.team_name && <p className="text-red-400 text-xs mt-1">{joinErrors.team_name.message}</p>}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPreview(null)
+                      setServerError(null)
+                    }}
+                    className="flex-1 rounded-md border border-slate-700 px-3 py-1.5 text-sm text-slate-100"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isJoining}
+                    className="flex-1 rounded-md bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-900 disabled:opacity-50"
+                  >
+                    {isJoining ? 'Joining…' : 'Join league'}
+                  </button>
+                </div>
+              </form>
             ) : (
               <div className="space-y-2">
                 <p className="text-xs text-slate-500">

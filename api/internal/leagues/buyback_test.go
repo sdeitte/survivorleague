@@ -52,7 +52,7 @@ func TestService_BuyBackMember_HappyPath(t *testing.T) {
 	player := createTestUser(t, q, "player")
 	league, _ := createTestLeague(t, s, commissioner)
 
-	m, err := s.JoinByCode(context.Background(), league.ID, player.ID)
+	m, err := s.JoinByCode(context.Background(), league.ID, player.ID, "Test Team")
 	if err != nil {
 		t.Fatalf("JoinByCode: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestService_BuyBackMember_RejectsStillActiveMember(t *testing.T) {
 	player := createTestUser(t, q, "player")
 	league, _ := createTestLeague(t, s, commissioner)
 
-	m, err := s.JoinByCode(context.Background(), league.ID, player.ID)
+	m, err := s.JoinByCode(context.Background(), league.ID, player.ID, "Test Team")
 	if err != nil {
 		t.Fatalf("JoinByCode: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestService_BuyBackMember_CrossLeagueMembershipIsNotFound(t *testing.T) {
 	league1, _ := createTestLeague(t, s, commissioner1)
 	league2, _ := createTestLeague(t, s, commissioner2)
 
-	m, err := s.JoinByCode(context.Background(), league1.ID, player.ID)
+	m, err := s.JoinByCode(context.Background(), league1.ID, player.ID, "Test Team")
 	if err != nil {
 		t.Fatalf("JoinByCode: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestService_BuyBackMember_RejectsSecondBuyBackAfterReElimination(t *testing
 	player := createTestUser(t, q, "player")
 	league, _ := createTestLeague(t, s, commissioner)
 
-	m, err := s.JoinByCode(context.Background(), league.ID, player.ID)
+	m, err := s.JoinByCode(context.Background(), league.ID, player.ID, "Test Team")
 	if err != nil {
 		t.Fatalf("JoinByCode: %v", err)
 	}

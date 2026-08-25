@@ -18,7 +18,7 @@ SET status = 'eliminated',
     eliminated_game_id = $2,
     updated_at = now()
 WHERE id = $3
-RETURNING id, league_id, user_id, role, is_contestant, status, eliminated_week_id, eliminated_game_id, bought_back, bought_back_at, bought_back_by, created_at, updated_at, removed_at
+RETURNING id, league_id, user_id, role, is_contestant, status, eliminated_week_id, eliminated_game_id, bought_back, bought_back_at, bought_back_by, created_at, updated_at, removed_at, team_name
 `
 
 type EliminateMembershipParams struct {
@@ -47,6 +47,7 @@ func (q *Queries) EliminateMembership(ctx context.Context, arg EliminateMembersh
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RemovedAt,
+		&i.TeamName,
 	)
 	return i, err
 }
@@ -168,7 +169,7 @@ func (q *Queries) InsertLeagueWeekResultIfAbsent(ctx context.Context, arg Insert
 }
 
 const listActiveContestantMembershipsForLeague = `-- name: ListActiveContestantMembershipsForLeague :many
-SELECT id, league_id, user_id, role, is_contestant, status, eliminated_week_id, eliminated_game_id, bought_back, bought_back_at, bought_back_by, created_at, updated_at, removed_at FROM league_memberships
+SELECT id, league_id, user_id, role, is_contestant, status, eliminated_week_id, eliminated_game_id, bought_back, bought_back_at, bought_back_by, created_at, updated_at, removed_at, team_name FROM league_memberships
 WHERE league_id = $1
   AND status = 'active'
   AND is_contestant = true
@@ -202,6 +203,7 @@ func (q *Queries) ListActiveContestantMembershipsForLeague(ctx context.Context, 
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.RemovedAt,
+			&i.TeamName,
 		); err != nil {
 			return nil, err
 		}

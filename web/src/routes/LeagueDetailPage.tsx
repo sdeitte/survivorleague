@@ -17,6 +17,7 @@ import {
   removeMember,
   sendInvites,
   updateLeague,
+  updateTeamName,
   ApiError,
   type InviteSendResult,
   type LeaderboardEntry,
@@ -34,6 +35,7 @@ export function LeagueDetailPage() {
   const [closeConfirmText, setCloseConfirmText] = useState('')
   const [inviteRows, setInviteRows] = useState<{ name: string; email: string }[]>([{ name: '', email: '' }])
   const [inviteResults, setInviteResults] = useState<InviteSendResult[] | null>(null)
+  const [teamNameDraft, setTeamNameDraft] = useState('')
 
   const leagueQuery = useQuery({
     queryKey: ['league', id],
@@ -120,6 +122,11 @@ export function LeagueDetailPage() {
       setCloseConfirmText('')
     },
     onError: (err) => setActionError(err instanceof ApiError ? err.message : 'Failed to close league.'),
+  })
+
+  const setTeamNameMutation = useMutation({
+    mutationFn: (teamName: string) => updateTeamName(id!, teamName),
+    onSuccess: (updated) => queryClient.setQueryData(['league', id], updated),
   })
 
   const updateInviteRow = (index: number, field: 'name' | 'email', value: string) => {
@@ -428,6 +435,51 @@ export function LeagueDetailPage() {
           </div>
         )}
       </div>
+
+      {/* One-time backfill prompt: only pre-existing memberships from
+          before team names were required can ever have a blank one — a
+          new join/create always sets one up front (see CreateLeaguePage/
+          JoinLeaguePage), so this naturally stops firing once every
+          membership has a name, with no per-league gating needed. */}
+      <Dialog.Root open={!league.membership.team_name} onOpenChange={() => {}}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 bg-black/60" />
+          <Dialog.Content
+            onEscapeKeyDown={(e) => e.preventDefault()}
+            onPointerDownOutside={(e) => e.preventDefault()}
+            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm rounded-xl border border-slate-800 bg-slate-900 p-6 space-y-4"
+          >
+            <Dialog.Title className="text-lg font-semibold text-slate-100">Set your team name</Dialog.Title>
+            <Dialog.Description className="text-sm text-slate-500">
+              Give your squad in {league.name} a name — it'll show up on the leaderboard, chat, and picks instead
+              of your player name.
+            </Dialog.Description>
+            <input
+              type="text"
+              value={teamNameDraft}
+              onChange={(e) => setTeamNameDraft(e.target.value)}
+              placeholder="Team name"
+              maxLength={60}
+              className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600"
+            />
+            {setTeamNameMutation.error && (
+              <p className="text-sm text-red-400">
+                {setTeamNameMutation.error instanceof ApiError
+                  ? setTeamNameMutation.error.message
+                  : 'Failed to save team name.'}
+              </p>
+            )}
+            <button
+              type="button"
+              disabled={!teamNameDraft.trim() || setTeamNameMutation.isPending}
+              onClick={() => setTeamNameMutation.mutate(teamNameDraft)}
+              className="w-full rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {setTeamNameMutation.isPending ? 'Saving…' : 'Save team name'}
+            </button>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
 
       <Dialog.Root open={!!memberToRemove} onOpenChange={(open) => !open && setMemberToRemove(null)}>
         <Dialog.Portal>

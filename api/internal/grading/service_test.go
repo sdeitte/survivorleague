@@ -188,7 +188,7 @@ func getMembership(t *testing.T, env testEnv, id pgtype.UUID) gen.LeagueMembersh
 func createLeague(t *testing.T, env testEnv, name string) (gen.League, gen.LeagueMembership) {
 	t.Helper()
 	commissioner := createTestUser(t, env.q, "commish")
-	league, member, err := env.leagues.CreateLeague(context.Background(), commissioner.ID, name, 2026, "Big Ten")
+	league, member, err := env.leagues.CreateLeague(context.Background(), commissioner.ID, name, 2026, "Big Ten", "Test Team")
 	if err != nil {
 		t.Fatalf("CreateLeague: %v", err)
 	}
@@ -200,7 +200,7 @@ func createLeague(t *testing.T, env testEnv, name string) (gen.League, gen.Leagu
 func addPlayer(t *testing.T, env testEnv, league gen.League, label string) gen.LeagueMembership {
 	t.Helper()
 	user := createTestUser(t, env.q, label)
-	member, err := env.leagues.JoinByCode(context.Background(), league.ID, user.ID)
+	member, err := env.leagues.JoinByCode(context.Background(), league.ID, user.ID, "Test Team")
 	if err != nil {
 		t.Fatalf("JoinByCode: %v", err)
 	}
@@ -696,7 +696,7 @@ func TestTryFinalizeLeagueWeek_WaitsForAllConferenceGamesFinal(t *testing.T) {
 func TestTryFinalizeLeagueWeek_NonContestantCommissionerExcluded(t *testing.T) {
 	env := newTestEnv(t)
 	commissionerUser := createTestUser(t, env.q, "manage-only-commish")
-	league, commissionerMember, err := env.leagues.CreateLeague(context.Background(), commissionerUser.ID, "Non-Contestant Commish", 2026, "Big Ten")
+	league, commissionerMember, err := env.leagues.CreateLeague(context.Background(), commissionerUser.ID, "Non-Contestant Commish", 2026, "Big Ten", "Test Team")
 	if err != nil {
 		t.Fatalf("CreateLeague: %v", err)
 	}

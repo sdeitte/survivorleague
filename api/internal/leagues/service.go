@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -39,7 +40,36 @@ var (
 	// ErrLeagueAlreadyClosed is returned by CloseLeague when the league's
 	// status is already 'closed'.
 	ErrLeagueAlreadyClosed = errors.New("leagues: league is already closed")
+	// ErrTeamNameRequired is returned by CreateLeague/JoinByCode/
+	// UpdateTeamName for a blank (or whitespace-only) team name — required
+	// at every join/create going forward, per the product decision that
+	// every league should have team names from here on (existing
+	// memberships from before this shipped are backfilled via the
+	// one-time prompt calling UpdateTeamName, not exempted from this rule
+	// going forward).
+	ErrTeamNameRequired = errors.New("leagues: team name cannot be empty")
+	// ErrTeamNameTooLong is returned when a trimmed team name exceeds
+	// maxTeamNameLength.
+	ErrTeamNameTooLong = errors.New("leagues: team name too long")
 )
+
+// maxTeamNameLength is a sanity cap, not a design constraint — mirrors
+// internal/chat's identical reasoning for its own message-length cap.
+const maxTeamNameLength = 60
+
+// validateTeamName trims and validates a team name, shared by
+// CreateLeague, JoinByCode, and UpdateTeamName so the same rule can never
+// drift between the three entry points.
+func validateTeamName(teamName string) (string, error) {
+	trimmed := strings.TrimSpace(teamName)
+	if trimmed == "" {
+		return "", ErrTeamNameRequired
+	}
+	if len(trimmed) > maxTeamNameLength {
+		return "", ErrTeamNameTooLong
+	}
+	return trimmed, nil
+}
 
 // Notifier is the notification-enqueueing surface BuyBackMember calls
 // into (Phase 7) once a reinstatement has succeeded. Deliberately a small
@@ -85,8 +115,15 @@ func NewService(queries *gen.Queries, pool *pgxpool.Pool, opts ...Option) *Servi
 // CreateLeague creates a new league with a fresh unique invite code and,
 // in the same transaction, the commissioner's own active-contestant
 // membership row — per the plan's confirmed rule, there is no separate
-// join step for the league's creator.
-func (s *Service) CreateLeague(ctx context.Context, commissionerUserID pgtype.UUID, name string, seasonYear int32, conference string) (gen.League, gen.LeagueMembership, error) {
+// join step for the league's creator. teamName is required (see
+// validateTeamName) — the commissioner sets their own team name at
+// creation time, same as any other joiner does via JoinByCode.
+func (s *Service) CreateLeague(ctx context.Context, commissionerUserID pgtype.UUID, name string, seasonYear int32, conference string, teamName string) (gen.League, gen.LeagueMembership, error) {
+	teamName, err := validateTeamName(teamName)
+	if err != nil {
+		return gen.League{}, gen.LeagueMembership{}, err
+	}
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return gen.League{}, gen.LeagueMembership{}, err
@@ -118,6 +155,7 @@ func (s *Service) CreateLeague(ctx context.Context, commissionerUserID pgtype.UU
 		UserID:       commissionerUserID,
 		Role:         "commissioner",
 		IsContestant: true,
+		TeamName:     pgtype.Text{String: teamName, Valid: true},
 	})
 	if err != nil {
 		return gen.League{}, gen.LeagueMembership{}, err
@@ -271,14 +309,46 @@ func (s *Service) RegenerateInviteCode(ctx context.Context, leagueID pgtype.UUID
 // internal/db/queries/league_memberships.sql for exactly how the
 // rejoin-after-removal case is handled against the
 // UNIQUE(league_id, user_id) constraint.
-func (s *Service) JoinByCode(ctx context.Context, leagueID, userID pgtype.UUID) (gen.LeagueMembership, error) {
+func (s *Service) JoinByCode(ctx context.Context, leagueID, userID pgtype.UUID, teamName string) (gen.LeagueMembership, error) {
+	teamName, err := validateTeamName(teamName)
+	if err != nil {
+		return gen.LeagueMembership{}, err
+	}
+
 	m, err := s.queries.UpsertLeagueMembershipOnJoin(ctx, gen.UpsertLeagueMembershipOnJoinParams{
 		LeagueID: leagueID,
 		UserID:   userID,
+		TeamName: pgtype.Text{String: teamName, Valid: true},
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return gen.LeagueMembership{}, ErrAlreadyMember
+		}
+		return gen.LeagueMembership{}, err
+	}
+	return m, nil
+}
+
+// UpdateTeamName sets or changes a member's own team name in leagueID at
+// any time — backs PATCH /leagues/:id/team-name. Used both for the
+// one-time backfill prompt (a pre-existing membership with team_name
+// still NULL) and ordinary renaming later; there's no distinction between
+// the two at this layer. ErrMembershipNotFound if userID has no non-removed
+// membership in leagueID.
+func (s *Service) UpdateTeamName(ctx context.Context, leagueID, userID pgtype.UUID, teamName string) (gen.LeagueMembership, error) {
+	teamName, err := validateTeamName(teamName)
+	if err != nil {
+		return gen.LeagueMembership{}, err
+	}
+
+	m, err := s.queries.UpdateTeamName(ctx, gen.UpdateTeamNameParams{
+		LeagueID: leagueID,
+		UserID:   userID,
+		TeamName: pgtype.Text{String: teamName, Valid: true},
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return gen.LeagueMembership{}, ErrMembershipNotFound
 		}
 		return gen.LeagueMembership{}, err
 	}

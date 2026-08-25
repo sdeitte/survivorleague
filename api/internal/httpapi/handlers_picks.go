@@ -232,6 +232,7 @@ func (a *API) handleListWeekPicks(w http.ResponseWriter, r *http.Request) {
 		resp := memberPickStatusResponse{
 			MembershipID: db.UUIDString(row.Row.MembershipID),
 			DisplayName:  row.Row.DisplayName,
+			TeamName:     row.Row.TeamName.String,
 			HasPicked:    row.HasPicked,
 		}
 		isOwn := row.Row.MembershipID == lc.Membership.ID

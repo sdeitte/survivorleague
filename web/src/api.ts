@@ -122,6 +122,10 @@ export interface MembershipSummary {
   role: 'commissioner' | 'player'
   is_contestant: boolean
   status: 'active' | 'eliminated'
+  // Empty for a membership created before team names were required (see
+  // api/migrations/00007_team_names.sql) — LeagueDetailPage's one-time
+  // backfill prompt checks exactly this.
+  team_name?: string
 }
 
 export interface League {
@@ -234,6 +238,7 @@ export interface AvailableTeamsResponse {
 export interface MemberPickStatus {
   membership_id: string
   display_name: string
+  team_name?: string
   has_picked: boolean
   game_id?: string
   team_id?: string
@@ -244,6 +249,7 @@ export interface MemberPickStatus {
 export interface LeaderboardEntry {
   membership_id: string
   display_name: string
+  team_name?: string
   role: 'commissioner' | 'player'
   status: 'active' | 'eliminated'
   is_contestant: boolean
@@ -439,6 +445,7 @@ export async function createLeague(input: {
   name: string
   season_year: number
   conference: string
+  team_name: string
 }): Promise<League> {
   return apiFetch<League>('/leagues', { method: 'POST', body: input })
 }
@@ -504,8 +511,18 @@ export async function previewInvite(code: string): Promise<InvitePreviewResponse
   return parseJsonOrThrow<InvitePreviewResponse>(res)
 }
 
-export async function joinLeagueByCode(code: string): Promise<League> {
-  return apiFetch<League>(`/invites/${encodeURIComponent(code)}/join`, { method: 'POST' })
+export async function joinLeagueByCode(code: string, teamName: string): Promise<League> {
+  return apiFetch<League>(`/invites/${encodeURIComponent(code)}/join`, {
+    method: 'POST',
+    body: { team_name: teamName },
+  })
+}
+
+export async function updateTeamName(leagueId: string, teamName: string): Promise<League> {
+  return apiFetch<League>(`/leagues/${leagueId}/team-name`, {
+    method: 'PATCH',
+    body: { team_name: teamName },
+  })
 }
 
 // --- Schedule / Picks (Phase 4) ---
@@ -582,6 +599,7 @@ export async function getLatestRecap(leagueId: string): Promise<WeekRecap> {
 export interface ChatMessage {
   id: string
   display_name: string
+  team_name?: string
   body: string
   created_at: string
 }

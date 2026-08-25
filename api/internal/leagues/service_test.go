@@ -65,7 +65,7 @@ func createTestUser(t *testing.T, q *gen.Queries, label string) gen.User {
 
 func createTestLeague(t *testing.T, s *Service, commissioner gen.User) (gen.League, gen.LeagueMembership) {
 	t.Helper()
-	league, membership, err := s.CreateLeague(context.Background(), commissioner.ID, fmt.Sprintf("Test League %d", time.Now().UnixNano()), 2026, "SEC")
+	league, membership, err := s.CreateLeague(context.Background(), commissioner.ID, fmt.Sprintf("Test League %d", time.Now().UnixNano()), 2026, "SEC", "Test Team")
 	if err != nil {
 		t.Fatalf("CreateLeague: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestService_CreateLeague_AutoAddsCommissionerAsContestant(t *testing.T) {
 	s, _ := newTestService(t)
 	commissioner := createTestUser(t, s.queries, "commish")
 
-	league, membership, err := s.CreateLeague(context.Background(), commissioner.ID, "Auto-Add Test League", 2026, "Big Ten")
+	league, membership, err := s.CreateLeague(context.Background(), commissioner.ID, "Auto-Add Test League", 2026, "Big Ten", "Test Team")
 	if err != nil {
 		t.Fatalf("CreateLeague: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestService_JoinByCode_RejoinAfterRemoval(t *testing.T) {
 	league, commissionerMembership := createTestLeague(t, s, commissioner)
 
 	// First join.
-	m1, err := s.JoinByCode(context.Background(), league.ID, player.ID)
+	m1, err := s.JoinByCode(context.Background(), league.ID, player.ID, "Test Team")
 	if err != nil {
 		t.Fatalf("JoinByCode (first join): %v", err)
 	}
@@ -168,7 +168,7 @@ func TestService_JoinByCode_RejoinAfterRemoval(t *testing.T) {
 
 	// Rejoin via the same invite code must succeed, not fail on the
 	// UNIQUE(league_id, user_id) constraint.
-	m2, err := s.JoinByCode(context.Background(), league.ID, player.ID)
+	m2, err := s.JoinByCode(context.Background(), league.ID, player.ID, "Test Team")
 	if err != nil {
 		t.Fatalf("JoinByCode (rejoin after removal): %v", err)
 	}
@@ -200,11 +200,11 @@ func TestService_JoinByCode_AlreadyActiveMemberIsConflict(t *testing.T) {
 	player := createTestUser(t, q, "player")
 	league, _ := createTestLeague(t, s, commissioner)
 
-	if _, err := s.JoinByCode(context.Background(), league.ID, player.ID); err != nil {
+	if _, err := s.JoinByCode(context.Background(), league.ID, player.ID, "Test Team"); err != nil {
 		t.Fatalf("JoinByCode (first join): %v", err)
 	}
 
-	if _, err := s.JoinByCode(context.Background(), league.ID, player.ID); !errors.Is(err, ErrAlreadyMember) {
+	if _, err := s.JoinByCode(context.Background(), league.ID, player.ID, "Test Team"); !errors.Is(err, ErrAlreadyMember) {
 		t.Fatalf("JoinByCode (second join while still active): got err %v, want %v", err, ErrAlreadyMember)
 	}
 }
@@ -218,7 +218,7 @@ func TestService_JoinByCode_ProtectsCommissionerOwnMembership(t *testing.T) {
 	commissioner := createTestUser(t, s.queries, "commish")
 	league, commissionerMembership := createTestLeague(t, s, commissioner)
 
-	if _, err := s.JoinByCode(context.Background(), league.ID, commissioner.ID); !errors.Is(err, ErrAlreadyMember) {
+	if _, err := s.JoinByCode(context.Background(), league.ID, commissioner.ID, "Test Team"); !errors.Is(err, ErrAlreadyMember) {
 		t.Fatalf("JoinByCode by the commissioner on their own league: got err %v, want %v", err, ErrAlreadyMember)
 	}
 
@@ -243,7 +243,7 @@ func TestService_RemoveMember_WrongLeagueIsNotFound(t *testing.T) {
 	league1, _ := createTestLeague(t, s, commissioner1)
 	league2, _ := createTestLeague(t, s, commissioner2)
 
-	m, err := s.JoinByCode(context.Background(), league1.ID, player.ID)
+	m, err := s.JoinByCode(context.Background(), league1.ID, player.ID, "Test Team")
 	if err != nil {
 		t.Fatalf("JoinByCode: %v", err)
 	}
@@ -271,11 +271,11 @@ func TestService_ListMembers_ExcludesRemoved(t *testing.T) {
 	playerC := createTestUser(t, q, "playerc")
 	league, _ := createTestLeague(t, s, commissioner)
 
-	mb, err := s.JoinByCode(context.Background(), league.ID, playerB.ID)
+	mb, err := s.JoinByCode(context.Background(), league.ID, playerB.ID, "Test Team")
 	if err != nil {
 		t.Fatalf("JoinByCode B: %v", err)
 	}
-	if _, err := s.JoinByCode(context.Background(), league.ID, playerC.ID); err != nil {
+	if _, err := s.JoinByCode(context.Background(), league.ID, playerC.ID, "Test Team"); err != nil {
 		t.Fatalf("JoinByCode C: %v", err)
 	}
 
@@ -379,7 +379,7 @@ func TestService_CloseLeague_SetsStatusAndPreservesData(t *testing.T) {
 	league, commMembership := createTestLeague(t, s, commissioner)
 
 	player := createTestUser(t, q, "player")
-	if _, err := s.JoinByCode(context.Background(), league.ID, player.ID); err != nil {
+	if _, err := s.JoinByCode(context.Background(), league.ID, player.ID, "Test Team"); err != nil {
 		t.Fatalf("JoinByCode: %v", err)
 	}
 
@@ -439,15 +439,15 @@ func TestService_ListLeaderboard_SortOrder(t *testing.T) {
 
 	league, commissionerMembership := createTestLeague(t, s, commissioner)
 
-	m4, err := s.JoinByCode(context.Background(), league.ID, player4.ID)
+	m4, err := s.JoinByCode(context.Background(), league.ID, player4.ID, "Test Team")
 	if err != nil {
 		t.Fatalf("JoinByCode player4: %v", err)
 	}
-	m2, err := s.JoinByCode(context.Background(), league.ID, player2.ID)
+	m2, err := s.JoinByCode(context.Background(), league.ID, player2.ID, "Test Team")
 	if err != nil {
 		t.Fatalf("JoinByCode player2: %v", err)
 	}
-	m3, err := s.JoinByCode(context.Background(), league.ID, player3.ID)
+	m3, err := s.JoinByCode(context.Background(), league.ID, player3.ID, "Test Team")
 	if err != nil {
 		t.Fatalf("JoinByCode player3: %v", err)
 	}
@@ -514,5 +514,107 @@ func TestService_ListLeaderboard_SortOrder(t *testing.T) {
 		if row.BoughtBack {
 			t.Errorf("row %s BoughtBack = true, want false (nobody in this fixture was bought back)", row.MembershipID)
 		}
+	}
+}
+
+func TestService_CreateLeague_RequiresTeamName(t *testing.T) {
+	s, _ := newTestService(t)
+	commissioner := createTestUser(t, s.queries, "commish")
+
+	if _, _, err := s.CreateLeague(context.Background(), commissioner.ID, "No Team Name League", 2026, "Big Ten", "   "); !errors.Is(err, ErrTeamNameRequired) {
+		t.Fatalf("CreateLeague with blank team name: got err %v, want %v", err, ErrTeamNameRequired)
+	}
+
+	tooLong := ""
+	for i := 0; i < maxTeamNameLength+1; i++ {
+		tooLong += "a"
+	}
+	if _, _, err := s.CreateLeague(context.Background(), commissioner.ID, "Too Long Team Name League", 2026, "Big Ten", tooLong); !errors.Is(err, ErrTeamNameTooLong) {
+		t.Fatalf("CreateLeague with too-long team name: got err %v, want %v", err, ErrTeamNameTooLong)
+	}
+
+	_, membership, err := s.CreateLeague(context.Background(), commissioner.ID, "Trimmed Team Name League", 2026, "Big Ten", "  My Squad  ")
+	if err != nil {
+		t.Fatalf("CreateLeague: %v", err)
+	}
+	if membership.TeamName.String != "My Squad" {
+		t.Errorf("membership.TeamName = %q, want trimmed %q", membership.TeamName.String, "My Squad")
+	}
+}
+
+func TestService_JoinByCode_RequiresTeamName(t *testing.T) {
+	s, q := newTestService(t)
+	commissioner := createTestUser(t, q, "commish")
+	player := createTestUser(t, q, "player")
+	league, _ := createTestLeague(t, s, commissioner)
+
+	if _, err := s.JoinByCode(context.Background(), league.ID, player.ID, ""); !errors.Is(err, ErrTeamNameRequired) {
+		t.Fatalf("JoinByCode with blank team name: got err %v, want %v", err, ErrTeamNameRequired)
+	}
+}
+
+// A player who was removed and later rejoins can set a different team name
+// than they had before — the upsert's reactivate branch must overwrite
+// team_name, not just leave the previous one in place.
+func TestService_JoinByCode_RejoinSetsNewTeamName(t *testing.T) {
+	s, q := newTestService(t)
+	commissioner := createTestUser(t, q, "commish")
+	player := createTestUser(t, q, "player")
+	league, _ := createTestLeague(t, s, commissioner)
+
+	m1, err := s.JoinByCode(context.Background(), league.ID, player.ID, "Original Squad")
+	if err != nil {
+		t.Fatalf("JoinByCode (first join): %v", err)
+	}
+	if m1.TeamName.String != "Original Squad" {
+		t.Errorf("first-join TeamName = %q, want %q", m1.TeamName.String, "Original Squad")
+	}
+
+	if _, err := s.RemoveMember(context.Background(), league.ID, m1.ID); err != nil {
+		t.Fatalf("RemoveMember: %v", err)
+	}
+
+	m2, err := s.JoinByCode(context.Background(), league.ID, player.ID, "New Squad")
+	if err != nil {
+		t.Fatalf("JoinByCode (rejoin): %v", err)
+	}
+	if m2.TeamName.String != "New Squad" {
+		t.Errorf("rejoin TeamName = %q, want %q", m2.TeamName.String, "New Squad")
+	}
+}
+
+func TestService_UpdateTeamName(t *testing.T) {
+	s, q := newTestService(t)
+	commissioner := createTestUser(t, q, "commish")
+	player := createTestUser(t, q, "player")
+	league, _ := createTestLeague(t, s, commissioner)
+
+	if _, err := s.JoinByCode(context.Background(), league.ID, player.ID, "Old Name"); err != nil {
+		t.Fatalf("JoinByCode: %v", err)
+	}
+
+	updated, err := s.UpdateTeamName(context.Background(), league.ID, player.ID, "  Better Name  ")
+	if err != nil {
+		t.Fatalf("UpdateTeamName: %v", err)
+	}
+	if updated.TeamName.String != "Better Name" {
+		t.Errorf("UpdateTeamName result TeamName = %q, want trimmed %q", updated.TeamName.String, "Better Name")
+	}
+
+	active, err := s.GetActiveMembership(context.Background(), league.ID, player.ID)
+	if err != nil {
+		t.Fatalf("GetActiveMembership: %v", err)
+	}
+	if active.TeamName.String != "Better Name" {
+		t.Errorf("GetActiveMembership TeamName = %q, want %q", active.TeamName.String, "Better Name")
+	}
+
+	if _, err := s.UpdateTeamName(context.Background(), league.ID, player.ID, ""); !errors.Is(err, ErrTeamNameRequired) {
+		t.Fatalf("UpdateTeamName with blank name: got err %v, want %v", err, ErrTeamNameRequired)
+	}
+
+	stranger := createTestUser(t, q, "stranger")
+	if _, err := s.UpdateTeamName(context.Background(), league.ID, stranger.ID, "Doesn't Matter"); !errors.Is(err, ErrMembershipNotFound) {
+		t.Fatalf("UpdateTeamName for a non-member: got err %v, want %v", err, ErrMembershipNotFound)
 	}
 }

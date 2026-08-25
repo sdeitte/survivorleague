@@ -120,6 +120,7 @@ func NewRouter(d Deps) http.Handler {
 	r.Route("/leagues/{id}", func(r chi.Router) {
 		r.With(a.RequireLeagueMember).Get("/", a.handleGetLeague)
 		r.With(a.RequireCommissioner, a.RequireLeagueOpen).Patch("/", a.handleUpdateLeague)
+		r.With(a.RequireLeagueMember, a.RequireLeagueOpen).Patch("/team-name", a.handleUpdateTeamName)
 		r.With(a.RequireCommissioner).Delete("/", a.handleCloseLeague)
 		r.With(a.RequireLeagueMember).Get("/members", a.handleListMembers)
 		r.With(a.RequireLeagueMember).Get("/members/{membershipId}/picks", a.handleListMembershipPicks)

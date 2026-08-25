@@ -69,7 +69,7 @@ export function LeagueChat({ leagueId, isCommissioner }: { leagueId: string; isC
         {messagesQuery.data?.map((m) => (
           <div key={m.id} className="group flex items-start justify-between gap-2 text-sm">
             <p className="min-w-0">
-              <span className="text-slate-400 font-medium">{m.display_name}</span>{' '}
+              <span className="text-slate-400 font-medium">{m.team_name || m.display_name}</span>{' '}
               <span className="text-slate-100 break-words">{m.body}</span>
             </p>
             {isCommissioner && (

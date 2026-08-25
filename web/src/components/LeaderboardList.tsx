@@ -75,7 +75,7 @@ function LeaderboardRow({
         <div className="flex items-center gap-3">
           <span className="text-xs text-slate-500 w-5 text-right">{rank}</span>
           <div>
-            <p className="text-sm text-slate-100">{entry.display_name}</p>
+            <p className="text-sm text-slate-100">{entry.team_name || entry.display_name}</p>
             {!entry.is_contestant && <p className="text-xs text-slate-500">not playing</p>}
           </div>
         </div>

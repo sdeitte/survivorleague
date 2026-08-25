@@ -43,10 +43,12 @@ SELECT
     inserted.league_id,
     inserted.user_id,
     u.display_name,
+    lm.team_name,
     inserted.body,
     inserted.created_at
 FROM inserted
 JOIN users u ON u.id = inserted.user_id
+JOIN league_memberships lm ON lm.league_id = inserted.league_id AND lm.user_id = inserted.user_id
 `
 
 type InsertLeagueMessageParams struct {
@@ -60,6 +62,7 @@ type InsertLeagueMessageRow struct {
 	LeagueID    pgtype.UUID        `json:"league_id"`
 	UserID      pgtype.UUID        `json:"user_id"`
 	DisplayName string             `json:"display_name"`
+	TeamName    pgtype.Text        `json:"team_name"`
 	Body        string             `json:"body"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
@@ -76,6 +79,7 @@ func (q *Queries) InsertLeagueMessage(ctx context.Context, arg InsertLeagueMessa
 		&i.LeagueID,
 		&i.UserID,
 		&i.DisplayName,
+		&i.TeamName,
 		&i.Body,
 		&i.CreatedAt,
 	)
@@ -88,10 +92,12 @@ SELECT
     m.league_id,
     m.user_id,
     u.display_name,
+    lm.team_name,
     m.body,
     m.created_at
 FROM league_messages m
 JOIN users u ON u.id = m.user_id
+JOIN league_memberships lm ON lm.league_id = m.league_id AND lm.user_id = m.user_id
 WHERE m.league_id = $1 AND m.created_at > $2
 ORDER BY m.created_at ASC
 `
@@ -106,15 +112,20 @@ type ListRecentLeagueMessagesRow struct {
 	LeagueID    pgtype.UUID        `json:"league_id"`
 	UserID      pgtype.UUID        `json:"user_id"`
 	DisplayName string             `json:"display_name"`
+	TeamName    pgtype.Text        `json:"team_name"`
 	Body        string             `json:"body"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 // Every message in the league newer than `since` (internal/chat.Service
 // computes this as now()-7days — the TTL is entirely a read-time filter,
-// see 00006_league_chat.sql), joined with the sender's display_name so
-// the chat UI doesn't need N+1 lookups. Oldest first (chat reads
-// top-to-bottom), unlike most of this codebase's other list queries.
+// see 00006_league_chat.sql), joined with the sender's display_name/
+// team_name so the chat UI doesn't need N+1 lookups. Oldest first (chat
+// reads top-to-bottom), unlike most of this codebase's other list
+// queries. team_name comes from league_memberships, not league_messages
+// itself (a chat message has no membership_id column, only league_id +
+// user_id — see InsertLeagueMessage's identical join, and 00006's
+// original design choice), joined on the UNIQUE(league_id, user_id) pair.
 func (q *Queries) ListRecentLeagueMessages(ctx context.Context, arg ListRecentLeagueMessagesParams) ([]ListRecentLeagueMessagesRow, error) {
 	rows, err := q.db.Query(ctx, listRecentLeagueMessages, arg.LeagueID, arg.Since)
 	if err != nil {
@@ -129,6 +140,7 @@ func (q *Queries) ListRecentLeagueMessages(ctx context.Context, arg ListRecentLe
 			&i.LeagueID,
 			&i.UserID,
 			&i.DisplayName,
+			&i.TeamName,
 			&i.Body,
 			&i.CreatedAt,
 		); err != nil {

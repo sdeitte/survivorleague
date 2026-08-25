@@ -160,7 +160,7 @@ func setGameStatus(t *testing.T, pool *pgxpool.Pool, gameID pgtype.UUID, status 
 func createTestLeague(t *testing.T, leaguesSvc *leagues.Service, q *gen.Queries, name string) (gen.League, gen.LeagueMembership) {
 	t.Helper()
 	commissioner := createTestUser(t, q)
-	league, member, err := leaguesSvc.CreateLeague(context.Background(), commissioner.ID, name, int32(uniqueSeasonYear()), "Big Ten")
+	league, member, err := leaguesSvc.CreateLeague(context.Background(), commissioner.ID, name, int32(uniqueSeasonYear()), "Big Ten", "Test Team")
 	if err != nil {
 		t.Fatalf("CreateLeague: %v", err)
 	}
@@ -171,7 +171,7 @@ func addTestPlayer(t *testing.T, leaguesSvc *leagues.Service, q *gen.Queries, le
 	t.Helper()
 	user := createTestUser(t, q)
 	_ = label
-	member, err := leaguesSvc.JoinByCode(context.Background(), league.ID, user.ID)
+	member, err := leaguesSvc.JoinByCode(context.Background(), league.ID, user.ID, "Test Team")
 	if err != nil {
 		t.Fatalf("JoinByCode: %v", err)
 	}

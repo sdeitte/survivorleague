@@ -216,7 +216,8 @@ SELECT
     m.id AS membership_id,
     m.role AS member_role,
     m.is_contestant AS member_is_contestant,
-    m.status AS member_status
+    m.status AS member_status,
+    m.team_name AS member_team_name
 FROM leagues l
 JOIN league_memberships m ON m.league_id = l.id
 WHERE m.user_id = $1 AND m.removed_at IS NULL
@@ -237,6 +238,7 @@ type ListLeaguesForUserRow struct {
 	MemberRole         string             `json:"member_role"`
 	MemberIsContestant bool               `json:"member_is_contestant"`
 	MemberStatus       string             `json:"member_status"`
+	MemberTeamName     pgtype.Text        `json:"member_team_name"`
 }
 
 // Leagues the given user has a non-removed membership in, along with their
@@ -264,6 +266,7 @@ func (q *Queries) ListLeaguesForUser(ctx context.Context, userID pgtype.UUID) ([
 			&i.MemberRole,
 			&i.MemberIsContestant,
 			&i.MemberStatus,
+			&i.MemberTeamName,
 		); err != nil {
 			return nil, err
 		}

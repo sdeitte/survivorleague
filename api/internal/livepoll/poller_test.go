@@ -231,11 +231,11 @@ func TestPoller_RealTickerGradesGameOnceItGoesFinal(t *testing.T) {
 
 	winnerUser := createTestUser(t, q, "poll-winner")
 	loserUser := createTestUser(t, q, "poll-loser")
-	league, winnerMember, err := leaguesSvc.CreateLeague(ctx, winnerUser.ID, "Poll Loop League", int32(seasonYear), "Big Ten")
+	league, winnerMember, err := leaguesSvc.CreateLeague(ctx, winnerUser.ID, "Poll Loop League", int32(seasonYear), "Big Ten", "Test Team")
 	if err != nil {
 		t.Fatalf("CreateLeague: %v", err)
 	}
-	loserMember, err := leaguesSvc.JoinByCode(ctx, league.ID, loserUser.ID)
+	loserMember, err := leaguesSvc.JoinByCode(ctx, league.ID, loserUser.ID, "Test Team")
 	if err != nil {
 		t.Fatalf("JoinByCode: %v", err)
 	}

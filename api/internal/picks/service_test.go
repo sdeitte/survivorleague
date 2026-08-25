@@ -182,7 +182,7 @@ func newFixture(t *testing.T, kickoffOffset time.Duration) fixture {
 	t.Helper()
 	env := newTestEnv(t)
 	commissioner := createTestUser(t, env.q, "commish")
-	league, member, err := env.leagues.CreateLeague(context.Background(), commissioner.ID, "Test Survivor League", 2026, "Big Ten")
+	league, member, err := env.leagues.CreateLeague(context.Background(), commissioner.ID, "Test Survivor League", 2026, "Big Ten", "Test Team")
 	if err != nil {
 		t.Fatalf("CreateLeague: %v", err)
 	}
@@ -486,7 +486,7 @@ func TestService_ListAvailableTeams_MatchupStatsAndPickCounts(t *testing.T) {
 		t.Fatalf("commissioner's pick: %v", err)
 	}
 	otherUser := createTestUser(t, f.env.q, "other")
-	otherMember, err := f.env.leagues.JoinByCode(ctx, f.league.ID, otherUser.ID)
+	otherMember, err := f.env.leagues.JoinByCode(ctx, f.league.ID, otherUser.ID, "Test Team")
 	if err != nil {
 		t.Fatalf("JoinByCode: %v", err)
 	}
@@ -651,7 +651,7 @@ func TestService_ListMembershipPicksForSeason(t *testing.T) {
 func TestService_ListWeekPicks_PrivacyRule(t *testing.T) {
 	f := newFixture(t, 48*time.Hour)
 	otherUser := createTestUser(t, f.env.q, "playerb")
-	otherMember, err := f.env.leagues.JoinByCode(context.Background(), f.league.ID, otherUser.ID)
+	otherMember, err := f.env.leagues.JoinByCode(context.Background(), f.league.ID, otherUser.ID, "Test Team")
 	if err != nil {
 		t.Fatalf("JoinByCode: %v", err)
 	}

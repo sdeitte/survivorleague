@@ -22,7 +22,7 @@ WHERE id = $2
   AND league_id = $3
   AND status = 'eliminated'
   AND bought_back = false
-RETURNING id, league_id, user_id, role, is_contestant, status, eliminated_week_id, eliminated_game_id, bought_back, bought_back_at, bought_back_by, created_at, updated_at, removed_at
+RETURNING id, league_id, user_id, role, is_contestant, status, eliminated_week_id, eliminated_game_id, bought_back, bought_back_at, bought_back_by, created_at, updated_at, removed_at, team_name
 `
 
 type BuyBackMembershipParams struct {
@@ -58,14 +58,15 @@ func (q *Queries) BuyBackMembership(ctx context.Context, arg BuyBackMembershipPa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RemovedAt,
+		&i.TeamName,
 	)
 	return i, err
 }
 
 const createLeagueMembership = `-- name: CreateLeagueMembership :one
-INSERT INTO league_memberships (league_id, user_id, role, is_contestant, status)
-VALUES ($1, $2, $3, $4, 'active')
-RETURNING id, league_id, user_id, role, is_contestant, status, eliminated_week_id, eliminated_game_id, bought_back, bought_back_at, bought_back_by, created_at, updated_at, removed_at
+INSERT INTO league_memberships (league_id, user_id, role, is_contestant, status, team_name)
+VALUES ($1, $2, $3, $4, 'active', $5)
+RETURNING id, league_id, user_id, role, is_contestant, status, eliminated_week_id, eliminated_game_id, bought_back, bought_back_at, bought_back_by, created_at, updated_at, removed_at, team_name
 `
 
 type CreateLeagueMembershipParams struct {
@@ -73,6 +74,7 @@ type CreateLeagueMembershipParams struct {
 	UserID       pgtype.UUID `json:"user_id"`
 	Role         string      `json:"role"`
 	IsContestant bool        `json:"is_contestant"`
+	TeamName     pgtype.Text `json:"team_name"`
 }
 
 func (q *Queries) CreateLeagueMembership(ctx context.Context, arg CreateLeagueMembershipParams) (LeagueMembership, error) {
@@ -81,6 +83,7 @@ func (q *Queries) CreateLeagueMembership(ctx context.Context, arg CreateLeagueMe
 		arg.UserID,
 		arg.Role,
 		arg.IsContestant,
+		arg.TeamName,
 	)
 	var i LeagueMembership
 	err := row.Scan(
@@ -98,12 +101,13 @@ func (q *Queries) CreateLeagueMembership(ctx context.Context, arg CreateLeagueMe
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RemovedAt,
+		&i.TeamName,
 	)
 	return i, err
 }
 
 const getLeagueMembershipByID = `-- name: GetLeagueMembershipByID :one
-SELECT id, league_id, user_id, role, is_contestant, status, eliminated_week_id, eliminated_game_id, bought_back, bought_back_at, bought_back_by, created_at, updated_at, removed_at FROM league_memberships WHERE id = $1
+SELECT id, league_id, user_id, role, is_contestant, status, eliminated_week_id, eliminated_game_id, bought_back, bought_back_at, bought_back_by, created_at, updated_at, removed_at, team_name FROM league_memberships WHERE id = $1
 `
 
 func (q *Queries) GetLeagueMembershipByID(ctx context.Context, id pgtype.UUID) (LeagueMembership, error) {
@@ -124,12 +128,13 @@ func (q *Queries) GetLeagueMembershipByID(ctx context.Context, id pgtype.UUID) (
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RemovedAt,
+		&i.TeamName,
 	)
 	return i, err
 }
 
 const getMembershipByIDAndLeague = `-- name: GetMembershipByIDAndLeague :one
-SELECT id, league_id, user_id, role, is_contestant, status, eliminated_week_id, eliminated_game_id, bought_back, bought_back_at, bought_back_by, created_at, updated_at, removed_at FROM league_memberships
+SELECT id, league_id, user_id, role, is_contestant, status, eliminated_week_id, eliminated_game_id, bought_back, bought_back_at, bought_back_by, created_at, updated_at, removed_at, team_name FROM league_memberships
 WHERE id = $1 AND league_id = $2 AND removed_at IS NULL
 `
 
@@ -162,12 +167,13 @@ func (q *Queries) GetMembershipByIDAndLeague(ctx context.Context, arg GetMembers
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RemovedAt,
+		&i.TeamName,
 	)
 	return i, err
 }
 
 const getMembershipByLeagueAndUser = `-- name: GetMembershipByLeagueAndUser :one
-SELECT id, league_id, user_id, role, is_contestant, status, eliminated_week_id, eliminated_game_id, bought_back, bought_back_at, bought_back_by, created_at, updated_at, removed_at FROM league_memberships
+SELECT id, league_id, user_id, role, is_contestant, status, eliminated_week_id, eliminated_game_id, bought_back, bought_back_at, bought_back_by, created_at, updated_at, removed_at, team_name FROM league_memberships
 WHERE league_id = $1 AND user_id = $2 AND removed_at IS NULL
 `
 
@@ -196,6 +202,7 @@ func (q *Queries) GetMembershipByLeagueAndUser(ctx context.Context, arg GetMembe
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RemovedAt,
+		&i.TeamName,
 	)
 	return i, err
 }
@@ -303,7 +310,7 @@ const removeMembership = `-- name: RemoveMembership :one
 UPDATE league_memberships
 SET removed_at = now(), updated_at = now()
 WHERE id = $1 AND league_id = $2 AND removed_at IS NULL
-RETURNING id, league_id, user_id, role, is_contestant, status, eliminated_week_id, eliminated_game_id, bought_back, bought_back_at, bought_back_by, created_at, updated_at, removed_at
+RETURNING id, league_id, user_id, role, is_contestant, status, eliminated_week_id, eliminated_game_id, bought_back, bought_back_at, bought_back_by, created_at, updated_at, removed_at, team_name
 `
 
 type RemoveMembershipParams struct {
@@ -333,6 +340,7 @@ func (q *Queries) RemoveMembership(ctx context.Context, arg RemoveMembershipPara
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RemovedAt,
+		&i.TeamName,
 	)
 	return i, err
 }
@@ -341,7 +349,7 @@ const updateCommissionerIsContestant = `-- name: UpdateCommissionerIsContestant 
 UPDATE league_memberships
 SET is_contestant = $1, updated_at = now()
 WHERE id = $2
-RETURNING id, league_id, user_id, role, is_contestant, status, eliminated_week_id, eliminated_game_id, bought_back, bought_back_at, bought_back_by, created_at, updated_at, removed_at
+RETURNING id, league_id, user_id, role, is_contestant, status, eliminated_week_id, eliminated_game_id, bought_back, bought_back_at, bought_back_by, created_at, updated_at, removed_at, team_name
 `
 
 type UpdateCommissionerIsContestantParams struct {
@@ -367,47 +375,32 @@ func (q *Queries) UpdateCommissionerIsContestant(ctx context.Context, arg Update
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RemovedAt,
+		&i.TeamName,
 	)
 	return i, err
 }
 
-const upsertLeagueMembershipOnJoin = `-- name: UpsertLeagueMembershipOnJoin :one
-INSERT INTO league_memberships (league_id, user_id, role, is_contestant, status)
-VALUES ($1, $2, 'player', true, 'active')
-ON CONFLICT (league_id, user_id) DO UPDATE
-SET role = 'player',
-    is_contestant = true,
-    status = 'active',
-    removed_at = NULL,
-    eliminated_week_id = NULL,
-    eliminated_game_id = NULL,
-    bought_back = false,
-    bought_back_at = NULL,
-    bought_back_by = NULL,
-    updated_at = now()
-WHERE league_memberships.removed_at IS NOT NULL
-RETURNING id, league_id, user_id, role, is_contestant, status, eliminated_week_id, eliminated_game_id, bought_back, bought_back_at, bought_back_by, created_at, updated_at, removed_at
+const updateTeamName = `-- name: UpdateTeamName :one
+UPDATE league_memberships
+SET team_name = $1, updated_at = now()
+WHERE league_id = $2 AND user_id = $3 AND removed_at IS NULL
+RETURNING id, league_id, user_id, role, is_contestant, status, eliminated_week_id, eliminated_game_id, bought_back, bought_back_at, bought_back_by, created_at, updated_at, removed_at, team_name
 `
 
-type UpsertLeagueMembershipOnJoinParams struct {
+type UpdateTeamNameParams struct {
+	TeamName pgtype.Text `json:"team_name"`
 	LeagueID pgtype.UUID `json:"league_id"`
 	UserID   pgtype.UUID `json:"user_id"`
 }
 
-// Handles both fresh joins and rejoin-after-removal against the
-// UNIQUE(league_id, user_id) constraint in one statement:
-//   - no existing row                     -> plain INSERT.
-//   - existing row with removed_at set    -> DO UPDATE resets it to a fresh
-//     active player membership (a
-//     "new row" in spirit, even
-//     though it reuses the id).
-//   - existing row with removed_at IS NULL (still an active/eliminated
-//     member) -> the DO UPDATE...WHERE guard doesn't match, so neither the
-//     INSERT nor the UPDATE applies and RETURNING yields zero rows. Callers
-//     treat "no rows" as "already a member" (409) — this also protects a
-//     commissioner's own membership from ever being reset by this query.
-func (q *Queries) UpsertLeagueMembershipOnJoin(ctx context.Context, arg UpsertLeagueMembershipOnJoinParams) (LeagueMembership, error) {
-	row := q.db.QueryRow(ctx, upsertLeagueMembershipOnJoin, arg.LeagueID, arg.UserID)
+// Backs PATCH /leagues/:id/team-name — a member setting/changing their own
+// team name at any time (both the one-time backfill prompt for a
+// pre-existing membership, and ordinary renaming later). Scoped by
+// (league_id, user_id), not membership id, since the caller always means
+// "my own membership in this league" — there's no route param carrying a
+// membership id for this endpoint.
+func (q *Queries) UpdateTeamName(ctx context.Context, arg UpdateTeamNameParams) (LeagueMembership, error) {
+	row := q.db.QueryRow(ctx, updateTeamName, arg.TeamName, arg.LeagueID, arg.UserID)
 	var i LeagueMembership
 	err := row.Scan(
 		&i.ID,
@@ -424,6 +417,67 @@ func (q *Queries) UpsertLeagueMembershipOnJoin(ctx context.Context, arg UpsertLe
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RemovedAt,
+		&i.TeamName,
+	)
+	return i, err
+}
+
+const upsertLeagueMembershipOnJoin = `-- name: UpsertLeagueMembershipOnJoin :one
+INSERT INTO league_memberships (league_id, user_id, role, is_contestant, status, team_name)
+VALUES ($1, $2, 'player', true, 'active', $3)
+ON CONFLICT (league_id, user_id) DO UPDATE
+SET role = 'player',
+    is_contestant = true,
+    status = 'active',
+    removed_at = NULL,
+    eliminated_week_id = NULL,
+    eliminated_game_id = NULL,
+    bought_back = false,
+    bought_back_at = NULL,
+    bought_back_by = NULL,
+    team_name = $3,
+    updated_at = now()
+WHERE league_memberships.removed_at IS NOT NULL
+RETURNING id, league_id, user_id, role, is_contestant, status, eliminated_week_id, eliminated_game_id, bought_back, bought_back_at, bought_back_by, created_at, updated_at, removed_at, team_name
+`
+
+type UpsertLeagueMembershipOnJoinParams struct {
+	LeagueID pgtype.UUID `json:"league_id"`
+	UserID   pgtype.UUID `json:"user_id"`
+	TeamName pgtype.Text `json:"team_name"`
+}
+
+// Handles both fresh joins and rejoin-after-removal against the
+// UNIQUE(league_id, user_id) constraint in one statement:
+//   - no existing row                     -> plain INSERT.
+//   - existing row with removed_at set    -> DO UPDATE resets it to a fresh
+//     active player membership (a
+//     "new row" in spirit, even
+//     though it reuses the id).
+//   - existing row with removed_at IS NULL (still an active/eliminated
+//     member) -> the DO UPDATE...WHERE guard doesn't match, so neither the
+//     INSERT nor the UPDATE applies and RETURNING yields zero rows. Callers
+//     treat "no rows" as "already a member" (409) — this also protects a
+//     commissioner's own membership from ever being reset by this query.
+func (q *Queries) UpsertLeagueMembershipOnJoin(ctx context.Context, arg UpsertLeagueMembershipOnJoinParams) (LeagueMembership, error) {
+	row := q.db.QueryRow(ctx, upsertLeagueMembershipOnJoin, arg.LeagueID, arg.UserID, arg.TeamName)
+	var i LeagueMembership
+	err := row.Scan(
+		&i.ID,
+		&i.LeagueID,
+		&i.UserID,
+		&i.Role,
+		&i.IsContestant,
+		&i.Status,
+		&i.EliminatedWeekID,
+		&i.EliminatedGameID,
+		&i.BoughtBack,
+		&i.BoughtBackAt,
+		&i.BoughtBackBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.RemovedAt,
+		&i.TeamName,
 	)
 	return i, err
 }

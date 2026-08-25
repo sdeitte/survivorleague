@@ -15,6 +15,7 @@ const listLeaderboardForLeague = `-- name: ListLeaderboardForLeague :many
 SELECT
     m.id AS membership_id,
     u.display_name AS display_name,
+    m.team_name AS team_name,
     m.role AS role,
     m.status AS status,
     m.is_contestant AS is_contestant,
@@ -33,6 +34,7 @@ ORDER BY
 type ListLeaderboardForLeagueRow struct {
 	MembershipID     pgtype.UUID `json:"membership_id"`
 	DisplayName      string      `json:"display_name"`
+	TeamName         pgtype.Text `json:"team_name"`
 	Role             string      `json:"role"`
 	Status           string      `json:"status"`
 	IsContestant     bool        `json:"is_contestant"`
@@ -66,6 +68,7 @@ func (q *Queries) ListLeaderboardForLeague(ctx context.Context, leagueID pgtype.
 		if err := rows.Scan(
 			&i.MembershipID,
 			&i.DisplayName,
+			&i.TeamName,
 			&i.Role,
 			&i.Status,
 			&i.IsContestant,

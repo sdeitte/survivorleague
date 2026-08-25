@@ -390,7 +390,7 @@ export function PicksPage() {
                 )}
                 {weekPicksQuery.data?.map((status) => (
                   <div key={status.membership_id} className="flex items-center justify-between p-4">
-                    <p className="text-sm text-slate-100">{status.display_name}</p>
+                    <p className="text-sm text-slate-100">{status.team_name || status.display_name}</p>
                     {status.has_picked ? (
                       status.team_id ? (
                         <span className="text-xs text-emerald-400 flex items-center gap-1.5">

@@ -132,7 +132,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("register %s: %v", name, err)
 		}
-		membership, err := leaguesSvc.JoinByCode(ctx, leagueID, sess.User.ID)
+		membership, err := leaguesSvc.JoinByCode(ctx, leagueID, sess.User.ID, name+"'s Squad")
 		if err != nil {
 			log.Fatalf("join %s: %v", name, err)
 		}

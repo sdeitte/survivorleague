@@ -27,3 +27,8 @@ export const resetPasswordSchema = z.object({
   new_password: z.string().min(8, 'Password must be at least 8 characters'),
 })
 export type ResetPasswordFormValues = z.infer<typeof resetPasswordSchema>
+
+export const settingsSchema = z.object({
+  display_name: z.string().trim().min(1, 'Player name is required'),
+})
+export type SettingsFormValues = z.infer<typeof settingsSchema>

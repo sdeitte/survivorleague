@@ -284,6 +284,7 @@ const listPicksByWeekForLeague = `-- name: ListPicksByWeekForLeague :many
 SELECT
     m.id AS membership_id,
     u.display_name AS display_name,
+    m.team_name AS team_name,
     p.id AS pick_id,
     p.game_id AS game_id,
     p.team_id AS team_id,
@@ -304,6 +305,7 @@ type ListPicksByWeekForLeagueParams struct {
 type ListPicksByWeekForLeagueRow struct {
 	MembershipID pgtype.UUID        `json:"membership_id"`
 	DisplayName  string             `json:"display_name"`
+	TeamName     pgtype.Text        `json:"team_name"`
 	PickID       pgtype.UUID        `json:"pick_id"`
 	GameID       pgtype.UUID        `json:"game_id"`
 	TeamID       pgtype.UUID        `json:"team_id"`
@@ -327,6 +329,7 @@ func (q *Queries) ListPicksByWeekForLeague(ctx context.Context, arg ListPicksByW
 		if err := rows.Scan(
 			&i.MembershipID,
 			&i.DisplayName,
+			&i.TeamName,
 			&i.PickID,
 			&i.GameID,
 			&i.TeamID,

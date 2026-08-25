@@ -15,6 +15,7 @@ import { JoinLeaguePage } from './routes/JoinLeaguePage'
 import { LeagueDetailPage } from './routes/LeagueDetailPage'
 import { PicksPage } from './routes/PicksPage'
 import { NotificationPreferencesPage } from './routes/NotificationPreferencesPage'
+import { SettingsPage } from './routes/SettingsPage'
 import { AdminOverviewPage } from './routes/AdminOverviewPage'
 import { AdminLeaguesPage } from './routes/AdminLeaguesPage'
 import { AdminUsersPage } from './routes/AdminUsersPage'
@@ -78,6 +79,14 @@ function App() {
           element={
             <ProtectedRoute>
               <NotificationPreferencesPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <ProtectedRoute>
+              <SettingsPage />
             </ProtectedRoute>
           }
         />

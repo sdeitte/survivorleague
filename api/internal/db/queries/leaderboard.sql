@@ -16,6 +16,7 @@
 SELECT
     m.id AS membership_id,
     u.display_name AS display_name,
+    m.team_name AS team_name,
     m.role AS role,
     m.status AS status,
     m.is_contestant AS is_contestant,

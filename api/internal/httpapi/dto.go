@@ -112,6 +112,17 @@ type createLeagueRequest struct {
 	Name       string `json:"name"`
 	SeasonYear int32  `json:"season_year"`
 	Conference string `json:"conference"`
+	TeamName   string `json:"team_name"`
+}
+
+// joinByCodeRequest is the body of POST /invites/:code/join.
+type joinByCodeRequest struct {
+	TeamName string `json:"team_name"`
+}
+
+// updateTeamNameRequest is the body of PATCH /leagues/:id/team-name.
+type updateTeamNameRequest struct {
+	TeamName string `json:"team_name"`
 }
 
 // updateLeagueRequest covers the two fields PATCH /leagues/:id may change.
@@ -131,6 +142,10 @@ type membershipSummary struct {
 	Role         string `json:"role"`
 	IsContestant bool   `json:"is_contestant"`
 	Status       string `json:"status"`
+	// TeamName is empty for a membership created before team names were
+	// required (see 00007_team_names.sql) — the frontend's one-time
+	// backfill prompt on the league overview page checks exactly this.
+	TeamName string `json:"team_name,omitempty"`
 }
 
 // leagueResponse is returned by every endpoint that hands back a league
@@ -148,7 +163,7 @@ type leagueResponse struct {
 	Membership         membershipSummary `json:"membership"`
 }
 
-func toLeagueResponse(league gen.League, membershipID pgtype.UUID, role string, isContestant bool, status string) leagueResponse {
+func toLeagueResponse(league gen.League, membershipID pgtype.UUID, role string, isContestant bool, status string, teamName pgtype.Text) leagueResponse {
 	return leagueResponse{
 		ID:                 db.UUIDString(league.ID),
 		Name:               league.Name,
@@ -162,6 +177,7 @@ func toLeagueResponse(league gen.League, membershipID pgtype.UUID, role string, 
 			Role:         role,
 			IsContestant: isContestant,
 			Status:       status,
+			TeamName:     teamName.String,
 		},
 	}
 }
@@ -221,6 +237,7 @@ func toMembershipResponse(m gen.LeagueMembership) membershipResponse {
 type leaderboardEntryResponse struct {
 	MembershipID     string `json:"membership_id"`
 	DisplayName      string `json:"display_name"`
+	TeamName         string `json:"team_name,omitempty"`
 	Role             string `json:"role"`
 	Status           string `json:"status"`
 	IsContestant     bool   `json:"is_contestant"`
@@ -232,6 +249,7 @@ func toLeaderboardEntryResponse(row gen.ListLeaderboardForLeagueRow) leaderboard
 	return leaderboardEntryResponse{
 		MembershipID:     db.UUIDString(row.MembershipID),
 		DisplayName:      row.DisplayName,
+		TeamName:         row.TeamName.String,
 		Role:             row.Role,
 		Status:           row.Status,
 		IsContestant:     row.IsContestant,
@@ -254,19 +272,22 @@ type weekRecapResponse struct {
 type chatMessageResponse struct {
 	ID          string `json:"id"`
 	DisplayName string `json:"display_name"`
+	TeamName    string `json:"team_name,omitempty"`
 	Body        string `json:"body"`
 	CreatedAt   string `json:"created_at"`
 }
 
 // InsertLeagueMessage returns the same joined shape ListRecentLeagueMessages
-// does (see its query comment: display_name joined in, not a second round
-// trip), so the GET list and POST response share this one response type —
-// just two tiny converters, one per distinct sqlc row type, since Go
-// structs don't unify without an explicit conversion either way.
+// does (see its query comment: display_name/team_name joined in, not a
+// second round trip), so the GET list and POST response share this one
+// response type — just two tiny converters, one per distinct sqlc row
+// type, since Go structs don't unify without an explicit conversion
+// either way.
 func toChatMessageResponse(row gen.ListRecentLeagueMessagesRow) chatMessageResponse {
 	return chatMessageResponse{
 		ID:          db.UUIDString(row.ID),
 		DisplayName: row.DisplayName,
+		TeamName:    row.TeamName.String,
 		Body:        row.Body,
 		CreatedAt:   formatTimestamp(row.CreatedAt),
 	}
@@ -276,6 +297,7 @@ func toChatMessageResponseFromInsert(row gen.InsertLeagueMessageRow) chatMessage
 	return chatMessageResponse{
 		ID:          db.UUIDString(row.ID),
 		DisplayName: row.DisplayName,
+		TeamName:    row.TeamName.String,
 		Body:        row.Body,
 		CreatedAt:   formatTimestamp(row.CreatedAt),
 	}
@@ -513,6 +535,7 @@ type availableTeamsResponse struct {
 type memberPickStatusResponse struct {
 	MembershipID string `json:"membership_id"`
 	DisplayName  string `json:"display_name"`
+	TeamName     string `json:"team_name,omitempty"`
 	HasPicked    bool   `json:"has_picked"`
 	GameID       string `json:"game_id,omitempty"`
 	TeamID       string `json:"team_id,omitempty"`

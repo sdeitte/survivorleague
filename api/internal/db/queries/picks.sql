@@ -114,6 +114,7 @@ ORDER BY w.week_number ASC;
 SELECT
     m.id AS membership_id,
     u.display_name AS display_name,
+    m.team_name AS team_name,
     p.id AS pick_id,
     p.game_id AS game_id,
     p.team_id AS team_id,

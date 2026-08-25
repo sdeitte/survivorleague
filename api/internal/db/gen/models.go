@@ -100,6 +100,7 @@ type LeagueMembership struct {
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 	RemovedAt        pgtype.Timestamptz `json:"removed_at"`
+	TeamName         pgtype.Text        `json:"team_name"`
 }
 
 type LeagueMessage struct {

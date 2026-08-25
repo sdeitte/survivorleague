@@ -167,7 +167,7 @@ func createTestGame(t *testing.T, q *gen.Queries, week gen.Week, home, away gen.
 func createLeague(t *testing.T, env testEnv, name string) (gen.League, gen.LeagueMembership) {
 	t.Helper()
 	commissioner := createTestUser(t, env.q, "commish")
-	league, member, err := env.leagues.CreateLeague(context.Background(), commissioner.ID, name, int32(uniqueSeasonYear()), "Big Ten")
+	league, member, err := env.leagues.CreateLeague(context.Background(), commissioner.ID, name, int32(uniqueSeasonYear()), "Big Ten", "Test Team")
 	if err != nil {
 		t.Fatalf("CreateLeague: %v", err)
 	}
@@ -177,7 +177,7 @@ func createLeague(t *testing.T, env testEnv, name string) (gen.League, gen.Leagu
 func addPlayer(t *testing.T, env testEnv, league gen.League, label string) gen.LeagueMembership {
 	t.Helper()
 	user := createTestUser(t, env.q, label)
-	member, err := env.leagues.JoinByCode(context.Background(), league.ID, user.ID)
+	member, err := env.leagues.JoinByCode(context.Background(), league.ID, user.ID, "Test Team")
 	if err != nil {
 		t.Fatalf("JoinByCode: %v", err)
 	}

@@ -1,6 +1,18 @@
 -- name: CreateLeagueMembership :one
-INSERT INTO league_memberships (league_id, user_id, role, is_contestant, status)
-VALUES (sqlc.arg(league_id), sqlc.arg(user_id), sqlc.arg(role), sqlc.arg(is_contestant), 'active')
+INSERT INTO league_memberships (league_id, user_id, role, is_contestant, status, team_name)
+VALUES (sqlc.arg(league_id), sqlc.arg(user_id), sqlc.arg(role), sqlc.arg(is_contestant), 'active', sqlc.arg(team_name))
+RETURNING *;
+
+-- name: UpdateTeamName :one
+-- Backs PATCH /leagues/:id/team-name — a member setting/changing their own
+-- team name at any time (both the one-time backfill prompt for a
+-- pre-existing membership, and ordinary renaming later). Scoped by
+-- (league_id, user_id), not membership id, since the caller always means
+-- "my own membership in this league" — there's no route param carrying a
+-- membership id for this endpoint.
+UPDATE league_memberships
+SET team_name = sqlc.arg(team_name), updated_at = now()
+WHERE league_id = sqlc.arg(league_id) AND user_id = sqlc.arg(user_id) AND removed_at IS NULL
 RETURNING *;
 
 -- name: GetLeagueMembershipByID :one
@@ -98,8 +110,8 @@ RETURNING *;
 --     INSERT nor the UPDATE applies and RETURNING yields zero rows. Callers
 --     treat "no rows" as "already a member" (409) — this also protects a
 --     commissioner's own membership from ever being reset by this query.
-INSERT INTO league_memberships (league_id, user_id, role, is_contestant, status)
-VALUES (sqlc.arg(league_id), sqlc.arg(user_id), 'player', true, 'active')
+INSERT INTO league_memberships (league_id, user_id, role, is_contestant, status, team_name)
+VALUES (sqlc.arg(league_id), sqlc.arg(user_id), 'player', true, 'active', sqlc.arg(team_name))
 ON CONFLICT (league_id, user_id) DO UPDATE
 SET role = 'player',
     is_contestant = true,
@@ -110,6 +122,7 @@ SET role = 'player',
     bought_back = false,
     bought_back_at = NULL,
     bought_back_by = NULL,
+    team_name = sqlc.arg(team_name),
     updated_at = now()
 WHERE league_memberships.removed_at IS NOT NULL
 RETURNING *;

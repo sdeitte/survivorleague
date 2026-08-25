@@ -73,14 +73,21 @@ func (a *API) handleCreateLeague(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	league, membership, err := a.leaguesService.CreateLeague(r.Context(), userID, req.Name, req.SeasonYear, req.Conference)
+	league, membership, err := a.leaguesService.CreateLeague(r.Context(), userID, req.Name, req.SeasonYear, req.Conference, req.TeamName)
 	if err != nil {
-		log.Printf("create league: %v", err)
-		writeError(w, http.StatusInternalServerError, "failed to create league")
+		switch {
+		case errors.Is(err, leagues.ErrTeamNameRequired):
+			writeError(w, http.StatusBadRequest, "team_name is required")
+		case errors.Is(err, leagues.ErrTeamNameTooLong):
+			writeError(w, http.StatusBadRequest, "team_name is too long")
+		default:
+			log.Printf("create league: %v", err)
+			writeError(w, http.StatusInternalServerError, "failed to create league")
+		}
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, toLeagueResponse(league, membership.ID, membership.Role, membership.IsContestant, membership.Status))
+	writeJSON(w, http.StatusCreated, toLeagueResponse(league, membership.ID, membership.Role, membership.IsContestant, membership.Status, membership.TeamName))
 }
 
 func (a *API) handleListLeagues(w http.ResponseWriter, r *http.Request) {
@@ -115,7 +122,7 @@ func (a *API) handleListLeagues(w http.ResponseWriter, r *http.Request) {
 			CreatedAt:          row.CreatedAt,
 			UpdatedAt:          row.UpdatedAt,
 		}
-		out = append(out, toLeagueResponse(league, row.MembershipID, row.MemberRole, row.MemberIsContestant, row.MemberStatus))
+		out = append(out, toLeagueResponse(league, row.MembershipID, row.MemberRole, row.MemberIsContestant, row.MemberStatus, row.MemberTeamName))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -126,7 +133,7 @@ func (a *API) handleGetLeague(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "not a member of this league")
 		return
 	}
-	writeJSON(w, http.StatusOK, toLeagueResponse(lc.League, lc.Membership.ID, lc.Membership.Role, lc.Membership.IsContestant, lc.Membership.Status))
+	writeJSON(w, http.StatusOK, toLeagueResponse(lc.League, lc.Membership.ID, lc.Membership.Role, lc.Membership.IsContestant, lc.Membership.Status, lc.Membership.TeamName))
 }
 
 // handleUpdateLeague implements PATCH /leagues/:id. `name` renames the
@@ -196,7 +203,43 @@ func (a *API) handleUpdateLeague(w http.ResponseWriter, r *http.Request) {
 		isContestant = updatedMembership.IsContestant
 	}
 
-	writeJSON(w, http.StatusOK, toLeagueResponse(league, lc.Membership.ID, lc.Membership.Role, isContestant, lc.Membership.Status))
+	writeJSON(w, http.StatusOK, toLeagueResponse(league, lc.Membership.ID, lc.Membership.Role, isContestant, lc.Membership.Status, lc.Membership.TeamName))
+}
+
+// handleUpdateTeamName implements PATCH /leagues/:id/team-name
+// (requireLeagueMember, requireLeagueOpen) — a member setting or changing
+// their own team name at any time, including via the one-time backfill
+// prompt the frontend shows when membershipSummary.TeamName is empty.
+func (a *API) handleUpdateTeamName(w http.ResponseWriter, r *http.Request) {
+	lc, ok := LeagueFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusForbidden, "not a member of this league")
+		return
+	}
+
+	var req updateTeamNameRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	membership, err := a.leaguesService.UpdateTeamName(r.Context(), lc.League.ID, lc.Membership.UserID, req.TeamName)
+	if err != nil {
+		switch {
+		case errors.Is(err, leagues.ErrTeamNameRequired):
+			writeError(w, http.StatusBadRequest, "team_name is required")
+		case errors.Is(err, leagues.ErrTeamNameTooLong):
+			writeError(w, http.StatusBadRequest, "team_name is too long")
+		case errors.Is(err, leagues.ErrMembershipNotFound):
+			writeError(w, http.StatusForbidden, "not a member of this league")
+		default:
+			log.Printf("update team name: %v", err)
+			writeError(w, http.StatusInternalServerError, "failed to update team name")
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toLeagueResponse(lc.League, membership.ID, membership.Role, membership.IsContestant, membership.Status, membership.TeamName))
 }
 
 // handleCloseLeague implements DELETE /leagues/:id (requireCommissioner —
@@ -255,7 +298,7 @@ func (a *API) handleCloseLeague(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, toLeagueResponse(league, lc.Membership.ID, lc.Membership.Role, lc.Membership.IsContestant, lc.Membership.Status))
+	writeJSON(w, http.StatusOK, toLeagueResponse(league, lc.Membership.ID, lc.Membership.Role, lc.Membership.IsContestant, lc.Membership.Status, lc.Membership.TeamName))
 }
 
 func (a *API) handleListMembers(w http.ResponseWriter, r *http.Request) {
@@ -603,6 +646,12 @@ func (a *API) handleJoinByCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var req joinByCodeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
 	code := chi.URLParam(r, "code")
 	league, err := a.leaguesService.GetLeagueByInviteCode(r.Context(), code)
 	if err != nil {
@@ -629,16 +678,21 @@ func (a *API) handleJoinByCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	membership, err := a.leaguesService.JoinByCode(r.Context(), league.ID, userID)
+	membership, err := a.leaguesService.JoinByCode(r.Context(), league.ID, userID, req.TeamName)
 	if err != nil {
-		if errors.Is(err, leagues.ErrAlreadyMember) {
+		switch {
+		case errors.Is(err, leagues.ErrAlreadyMember):
 			writeError(w, http.StatusConflict, "already a member of this league")
-			return
+		case errors.Is(err, leagues.ErrTeamNameRequired):
+			writeError(w, http.StatusBadRequest, "team_name is required")
+		case errors.Is(err, leagues.ErrTeamNameTooLong):
+			writeError(w, http.StatusBadRequest, "team_name is too long")
+		default:
+			log.Printf("join by code: %v", err)
+			writeError(w, http.StatusInternalServerError, "failed to join league")
 		}
-		log.Printf("join by code: %v", err)
-		writeError(w, http.StatusInternalServerError, "failed to join league")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, toLeagueResponse(league, membership.ID, membership.Role, membership.IsContestant, membership.Status))
+	writeJSON(w, http.StatusOK, toLeagueResponse(league, membership.ID, membership.Role, membership.IsContestant, membership.Status, membership.TeamName))
 }

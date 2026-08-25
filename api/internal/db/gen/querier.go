@@ -352,9 +352,13 @@ type Querier interface {
 	ListPicksByWeekForLeague(ctx context.Context, arg ListPicksByWeekForLeagueParams) ([]ListPicksByWeekForLeagueRow, error)
 	// Every message in the league newer than `since` (internal/chat.Service
 	// computes this as now()-7days — the TTL is entirely a read-time filter,
-	// see 00006_league_chat.sql), joined with the sender's display_name so
-	// the chat UI doesn't need N+1 lookups. Oldest first (chat reads
-	// top-to-bottom), unlike most of this codebase's other list queries.
+	// see 00006_league_chat.sql), joined with the sender's display_name/
+	// team_name so the chat UI doesn't need N+1 lookups. Oldest first (chat
+	// reads top-to-bottom), unlike most of this codebase's other list
+	// queries. team_name comes from league_memberships, not league_messages
+	// itself (a chat message has no membership_id column, only league_id +
+	// user_id — see InsertLeagueMessage's identical join, and 00006's
+	// original design choice), joined on the UNIQUE(league_id, user_id) pair.
 	ListRecentLeagueMessages(ctx context.Context, arg ListRecentLeagueMessagesParams) ([]ListRecentLeagueMessagesRow, error)
 	ListSyncRuns(ctx context.Context, rowLimit int32) ([]SyncRun, error)
 	// Every synced team's SP+ rating for the season — fetched once per
@@ -463,6 +467,13 @@ type Querier interface {
 	UpdateCommissionerIsContestant(ctx context.Context, arg UpdateCommissionerIsContestantParams) (LeagueMembership, error)
 	UpdateLeagueInviteCode(ctx context.Context, arg UpdateLeagueInviteCodeParams) (League, error)
 	UpdateLeagueName(ctx context.Context, arg UpdateLeagueNameParams) (League, error)
+	// Backs PATCH /leagues/:id/team-name — a member setting/changing their own
+	// team name at any time (both the one-time backfill prompt for a
+	// pre-existing membership, and ordinary renaming later). Scoped by
+	// (league_id, user_id), not membership id, since the caller always means
+	// "my own membership in this league" — there's no route param carrying a
+	// membership id for this endpoint.
+	UpdateTeamName(ctx context.Context, arg UpdateTeamNameParams) (LeagueMembership, error)
 	UpdateUserDisplayName(ctx context.Context, arg UpdateUserDisplayNameParams) (User, error)
 	// Backs POST /auth/reset-password. The caller (internal/auth.Service.
 	// ResetPassword) computes password_hash via the same argon2id

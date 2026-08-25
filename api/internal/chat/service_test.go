@@ -72,7 +72,7 @@ func TestService_PostMessage_HappyPath(t *testing.T) {
 	ctx := context.Background()
 
 	commissioner := createChatTestUser(t, q, "commish")
-	league, _, err := leaguesSvc.CreateLeague(ctx, commissioner.ID, "Chat Test League", 2026, "Big Ten")
+	league, _, err := leaguesSvc.CreateLeague(ctx, commissioner.ID, "Chat Test League", 2026, "Big Ten", "Test Team")
 	if err != nil {
 		t.Fatalf("CreateLeague: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestService_ListRecentMessages_ExcludesMessagesOlderThanSevenDays(t *testin
 	ctx := context.Background()
 
 	commissioner := createChatTestUser(t, q, "commish")
-	league, _, err := leaguesSvc.CreateLeague(ctx, commissioner.ID, "Chat TTL Test League", 2026, "SEC")
+	league, _, err := leaguesSvc.CreateLeague(ctx, commissioner.ID, "Chat TTL Test League", 2026, "SEC", "Test Team")
 	if err != nil {
 		t.Fatalf("CreateLeague: %v", err)
 	}
@@ -154,11 +154,11 @@ func TestService_DeleteMessage(t *testing.T) {
 	ctx := context.Background()
 
 	commissioner := createChatTestUser(t, q, "commish")
-	leagueA, _, err := leaguesSvc.CreateLeague(ctx, commissioner.ID, "Chat Delete League A", 2026, "Big Ten")
+	leagueA, _, err := leaguesSvc.CreateLeague(ctx, commissioner.ID, "Chat Delete League A", 2026, "Big Ten", "Test Team")
 	if err != nil {
 		t.Fatalf("CreateLeague A: %v", err)
 	}
-	leagueB, _, err := leaguesSvc.CreateLeague(ctx, commissioner.ID, "Chat Delete League B", 2026, "SEC")
+	leagueB, _, err := leaguesSvc.CreateLeague(ctx, commissioner.ID, "Chat Delete League B", 2026, "SEC", "Test Team")
 	if err != nil {
 		t.Fatalf("CreateLeague B: %v", err)
 	}

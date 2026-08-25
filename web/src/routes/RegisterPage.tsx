@@ -5,15 +5,14 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { BrandWordmark } from '../components/BrandWordmark'
 import { registerSchema, type RegisterFormValues } from '../auth/schemas'
-import { ApiError, joinLeagueByCode } from '../api'
+import { ApiError } from '../api'
 
 // A `?code=` param means this registration was reached via an emailed
-// league-invite join link (see JoinLeaguePage's doc comment) — in that
-// case, joining is folded directly into account creation so a brand-new
-// invitee lands straight in the league instead of a separate confirm
-// click. Any failure in that join step (network blip, code since
-// regenerated, etc.) falls back to /leagues/join?code=... — the account
-// still exists, so they can retry the join manually from there.
+// league-invite join link (see JoinLeaguePage's doc comment). Joining
+// itself isn't done here — it needs a team name, which JoinLeaguePage's
+// confirm step already collects — so a successful registration just
+// forwards to /leagues/join?code=..., which auto-previews the code and
+// lands the new user straight on the team-name/confirm form.
 export function RegisterPage() {
   const { register: registerAccount } = useAuth()
   const navigate = useNavigate()
@@ -40,14 +39,7 @@ export function RegisterPage() {
       navigate('/', { replace: true })
       return
     }
-    try {
-      const league = await joinLeagueByCode(code)
-      navigate(`/leagues/${league.id}`, { replace: true })
-    } catch {
-      // Account creation already succeeded — send them to the confirm
-      // screen to retry the join rather than losing the account.
-      navigate(`/leagues/join?code=${encodeURIComponent(code)}`, { replace: true })
-    }
+    navigate(`/leagues/join?code=${encodeURIComponent(code)}`, { replace: true })
   }
 
   return (
@@ -69,7 +61,7 @@ export function RegisterPage() {
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-3" noValidate>
           <div>
             <label htmlFor="display_name" className="block text-sm text-slate-300 mb-1">
-              Display name
+              Player name
             </label>
             <input
               id="display_name"

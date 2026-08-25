@@ -20,7 +20,8 @@ SELECT
     m.id AS membership_id,
     m.role AS member_role,
     m.is_contestant AS member_is_contestant,
-    m.status AS member_status
+    m.status AS member_status,
+    m.team_name AS member_team_name
 FROM leagues l
 JOIN league_memberships m ON m.league_id = l.id
 WHERE m.user_id = sqlc.arg(user_id) AND m.removed_at IS NULL

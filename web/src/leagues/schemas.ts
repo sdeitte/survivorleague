@@ -18,6 +18,11 @@ export const createLeagueSchema = z.object({
     .min(2000, 'Season year must be 2000 or later')
     .max(2100, 'Season year must be 2100 or earlier'),
   conference: z.string().trim().min(1, 'Select a conference'),
+  // Required at creation time for the commissioner's own membership, same
+  // rule JoinByCode enforces for every other joiner — see
+  // internal/leagues.Service's validateTeamName (60 char cap, mirrored
+  // here so a too-long name is caught before it round-trips).
+  team_name: z.string().trim().min(1, 'Team name is required').max(60, 'Team name is too long'),
 })
 export type CreateLeagueFormValues = z.infer<typeof createLeagueSchema>
 
@@ -29,3 +34,13 @@ export const joinCodeSchema = z.object({
     .transform((v) => v.toUpperCase()),
 })
 export type JoinCodeFormValues = z.infer<typeof joinCodeSchema>
+
+// Separate schema/form from joinCodeSchema above — JoinLeaguePage is a
+// two-step flow (look up code, then confirm join) using two independent
+// useForm instances. Sharing one form/schema across both steps would make
+// step 1's submit also validate team_name, a field that isn't even
+// rendered yet at that point.
+export const confirmJoinSchema = z.object({
+  team_name: z.string().trim().min(1, 'Team name is required').max(60, 'Team name is too long'),
+})
+export type ConfirmJoinFormValues = z.infer<typeof confirmJoinSchema>

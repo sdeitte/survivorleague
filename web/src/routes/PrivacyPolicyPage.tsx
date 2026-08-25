@@ -21,7 +21,7 @@ export function PrivacyPolicyPage() {
 
         <section className="space-y-2 text-sm text-slate-300">
           <h2 className="text-base font-semibold text-slate-100">What we collect</h2>
-          <p>When you create an account, we collect your email address, a display name you choose, and your password (stored as a salted hash — we never store or have access to your plain-text password).</p>
+          <p>When you create an account, we collect your email address, a player name you choose, and your password (stored as a salted hash — we never store or have access to your plain-text password). If you join a league, we also store the team name you choose for it.</p>
           <p>When you use the app, we store the leagues you join, the weekly picks you make, and league membership/results data needed to run the game.</p>
           <p>If you enable push notifications, we store a device push token (issued by Apple/Google via Expo's push service) so we can send you pick reminders and league updates. You can disable this at any time in Notification Preferences.</p>
         </section>
