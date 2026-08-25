@@ -8,6 +8,7 @@ import (
 	"html"
 	"log"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -313,6 +314,67 @@ func (s *Service) SendLeagueInviteEmail(ctx context.Context, toEmail, toDisplayN
 	return s.emailSender.Send(ctx, EmailMessage{
 		To:      toEmail,
 		Subject: fmt.Sprintf("You're invited to join %s", leagueName),
+		Text:    text,
+		HTML:    htmlBody,
+	})
+}
+
+// adminFeedbackEmail is the fixed inbox every "Provide feedback" submission
+// is sent to — same literal address already published on
+// PrivacyPolicyPage as this app's contact address, not worth making
+// configurable for a single-recipient inbox.
+const adminFeedbackEmail = "admin@survivorleague.football"
+
+// SendFeedbackEmail sends a direct, synchronous transactional email to the
+// site admin inbox containing a signed-in user's feedback or feature
+// request. Bypasses the outbox/preferences/dedupe machinery like
+// SendLeagueClosedEmail/SendLeagueInviteEmail above — there's exactly one
+// recipient and no per-user preference to check. ReplyTo is set to the
+// submitter's own email so the admin can just hit reply instead of
+// copy-pasting it out of the body.
+func (s *Service) SendFeedbackEmail(ctx context.Context, fromEmail, fromDisplayName, message string) error {
+	text := fmt.Sprintf("From: %s (%s)\n\n%s", fromDisplayName, fromEmail, message)
+	htmlBody := fmt.Sprintf(
+		"<p>From: %s (%s)</p><p>%s</p>",
+		html.EscapeString(fromDisplayName), html.EscapeString(fromEmail),
+		strings.ReplaceAll(html.EscapeString(message), "\n", "<br>"),
+	)
+	return s.emailSender.Send(ctx, EmailMessage{
+		To:      adminFeedbackEmail,
+		ReplyTo: fromEmail,
+		Subject: "Survivor League feedback",
+		Text:    text,
+		HTML:    htmlBody,
+	})
+}
+
+// broadcastEmailFrom is the fixed sender identity for a commissioner's
+// league-wide email blast — deliberately distinct from RESEND_FROM_EMAIL
+// (the address every other transactional email in this service sends
+// from): a broadcast is one-way commissioner-to-league communication, not
+// something whose reply should land in the same inbox as password resets.
+const broadcastEmailFrom = "Survivor League <noreply@survivorleague.football>"
+
+// SendLeagueBroadcastEmail sends one direct, synchronous transactional
+// email to a single league member as part of a commissioner's mass email
+// (POST .../broadcast-email). Called once per recipient by the handler,
+// mirroring SendLeagueInviteEmail's per-recipient loop — a bad address in
+// the middle of a league roster must not silently drop every email after
+// it.
+func (s *Service) SendLeagueBroadcastEmail(ctx context.Context, toEmail, toDisplayName, leagueName, subject, message string) error {
+	greeting := "Hi there"
+	if toDisplayName != "" {
+		greeting = "Hi " + toDisplayName
+	}
+	text := fmt.Sprintf("%s,\n\n%s\n\n— Sent to every member of %s", greeting, message, leagueName)
+	htmlBody := fmt.Sprintf(
+		"<p>%s,</p><p>%s</p><p style=\"color:#888;font-size:0.85em\">Sent to every member of %s.</p>",
+		html.EscapeString(greeting), strings.ReplaceAll(html.EscapeString(message), "\n", "<br>"), html.EscapeString(leagueName),
+	)
+	return s.emailSender.Send(ctx, EmailMessage{
+		From:    broadcastEmailFrom,
+		To:      toEmail,
+		Subject: subject,
 		Text:    text,
 		HTML:    htmlBody,
 	})

@@ -186,6 +186,15 @@ func (s *Service) ListLeaguesForUser(ctx context.Context, userID pgtype.UUID) ([
 	return s.queries.ListLeaguesForUser(ctx, userID)
 }
 
+// ListMemberEmails returns every non-removed member's user id/email/
+// display name for a league — the commissioner-only surface backing both
+// "copy all emails" and the league-wide broadcast email feature. Reuses
+// the same query CloseLeague already relies on for its closed-league
+// notification email.
+func (s *Service) ListMemberEmails(ctx context.Context, leagueID pgtype.UUID) ([]gen.ListLeagueMemberEmailsRow, error) {
+	return s.queries.ListLeagueMemberEmails(ctx, leagueID)
+}
+
 // GetLeagueByID looks up a league by id, mapping "no rows" to
 // ErrLeagueNotFound.
 func (s *Service) GetLeagueByID(ctx context.Context, id pgtype.UUID) (gen.League, error) {

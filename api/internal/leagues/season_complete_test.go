@@ -49,7 +49,7 @@ func seasonTestGame(t *testing.T, q *gen.Queries, seasonYear, weekNumber int32, 
 func TestService_IsSeasonComplete_NoGamesSyncedIsNotComplete(t *testing.T) {
 	s, q := newTestService(t)
 	commissioner := createTestUser(t, q, "commish")
-	seasonYear := int32(99000 + int(time.Now().UnixNano()%1000))
+	seasonYear := uniqueTestSeasonYear()
 	league, _, err := s.CreateLeague(context.Background(), commissioner.ID, "No Games League", seasonYear, "Big Ten", "Test Team")
 	if err != nil {
 		t.Fatalf("CreateLeague: %v", err)
@@ -71,7 +71,7 @@ func TestService_IsSeasonComplete_NoGamesSyncedIsNotComplete(t *testing.T) {
 func TestService_IsSeasonComplete_UnfinishedGameBlocksCompletion(t *testing.T) {
 	s, q := newTestService(t)
 	commissioner := createTestUser(t, q, "commish")
-	seasonYear := int32(91000 + int(time.Now().UnixNano()%1000))
+	seasonYear := uniqueTestSeasonYear()
 	league, _, err := s.CreateLeague(context.Background(), commissioner.ID, "Unfinished Games League", seasonYear, "Big Ten", "Test Team")
 	if err != nil {
 		t.Fatalf("CreateLeague: %v", err)
@@ -94,7 +94,7 @@ func TestService_IsSeasonComplete_UnfinishedGameBlocksCompletion(t *testing.T) {
 func TestService_IsSeasonComplete_AllFinalIsComplete(t *testing.T) {
 	s, q := newTestService(t)
 	commissioner := createTestUser(t, q, "commish")
-	seasonYear := int32(92000 + int(time.Now().UnixNano()%1000))
+	seasonYear := uniqueTestSeasonYear()
 	league, _, err := s.CreateLeague(context.Background(), commissioner.ID, "Complete Season League", seasonYear, "Big Ten", "Test Team")
 	if err != nil {
 		t.Fatalf("CreateLeague: %v", err)

@@ -43,6 +43,30 @@ func testWeek(t *testing.T, q *gen.Queries, weekNumber int32) gen.Week {
 	return week
 }
 
+// uniqueTestSeasonYearCounter seeds from real wall-clock entropy at test
+// process start. Seeding from time.Now().UnixNano() directly (as
+// testWeek above does, dividing by a small modulus) is NOT safe for any
+// test that aggregates across every game in a (season_year, week_number)
+// bucket — Go's clock on this platform only reports microsecond
+// resolution (UnixNano()'s last 3 digits are always 0), so a modulus
+// that's a divisor of 1000 always evaluates to the same value, and a
+// larger-but-still-small modulus like %4000 only has a handful of
+// distinct outcomes. Reusing the same season year across many test runs
+// silently accumulates extra games in the same week bucket, and given
+// enough real elapsed time in a long-running session, an old "future"
+// kickoff eventually becomes genuinely past — which is exactly what
+// broke TestService_BuyBackMember_AllowedBeforeCutoffWeekKickoff after
+// this test suite had been run many times over several hours. Dividing
+// out the fake trailing zeros first, then incrementing per call, gives
+// enough real entropy (~billions of possible values) that two different
+// test runs colliding is effectively impossible.
+var uniqueTestSeasonYearCounter = int32((time.Now().UnixNano() / 1000) % 900000000)
+
+func uniqueTestSeasonYear() int32 {
+	uniqueTestSeasonYearCounter++
+	return uniqueTestSeasonYearCounter
+}
+
 // TestService_BuyBackMember_HappyPath confirms the field-update contract:
 // status flips to active, bought_back/bought_back_at/bought_back_by are
 // set, and eliminated_week_id/eliminated_game_id are left untouched as the
@@ -236,7 +260,7 @@ func TestService_BuyBackMember_RejectsAfterCutoffWeekKickoff(t *testing.T) {
 	commissioner := createTestUser(t, q, "commish")
 	player := createTestUser(t, q, "player")
 
-	seasonYear := int32(97000 + int(time.Now().UnixNano()%1000))
+	seasonYear := uniqueTestSeasonYear()
 	league, _, err := s.CreateLeague(context.Background(), commissioner.ID, "Cutoff Test League", seasonYear, "Big Ten", "Test Team")
 	if err != nil {
 		t.Fatalf("CreateLeague: %v", err)
@@ -263,7 +287,7 @@ func TestService_BuyBackMember_AllowedBeforeCutoffWeekKickoff(t *testing.T) {
 	commissioner := createTestUser(t, q, "commish")
 	player := createTestUser(t, q, "player")
 
-	seasonYear := int32(98000 + int(time.Now().UnixNano()%1000))
+	seasonYear := uniqueTestSeasonYear()
 	league, _, err := s.CreateLeague(context.Background(), commissioner.ID, "Pre-Cutoff Test League", seasonYear, "Big Ten", "Test Team")
 	if err != nil {
 		t.Fatalf("CreateLeague: %v", err)

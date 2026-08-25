@@ -111,6 +111,7 @@ func NewRouter(d Deps) http.Handler {
 	r.With(a.RequireAuth).Delete("/me/device-tokens", a.handleDeleteDeviceToken)
 	r.With(a.RequireAuth).Get("/me/notification-preferences", a.handleGetNotificationPreferences)
 	r.With(a.RequireAuth).Put("/me/notification-preferences", a.handleUpdateNotificationPreferences)
+	r.With(a.RequireAuth).Post("/feedback", a.handleSendFeedback)
 
 	r.Get("/conferences", a.handleListConferences)
 
@@ -123,6 +124,8 @@ func NewRouter(d Deps) http.Handler {
 		r.With(a.RequireLeagueMember, a.RequireLeagueOpen).Patch("/team-name", a.handleUpdateTeamName)
 		r.With(a.RequireCommissioner).Delete("/", a.handleCloseLeague)
 		r.With(a.RequireLeagueMember).Get("/members", a.handleListMembers)
+		r.With(a.RequireCommissioner).Get("/members/emails", a.handleListMemberEmails)
+		r.With(a.RequireCommissioner).Post("/broadcast-email", a.handleBroadcastEmail)
 		r.With(a.RequireLeagueMember).Get("/members/{membershipId}/picks", a.handleListMembershipPicks)
 		r.With(a.RequireLeagueMember).Get("/leaderboard", a.handleGetLeaderboard)
 		r.With(a.RequireLeagueMember).Get("/recap", a.handleGetLatestRecap)

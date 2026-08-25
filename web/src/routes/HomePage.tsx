@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { BrandWordmark } from '../components/BrandWordmark'
+import { FeedbackButton } from '../components/FeedbackButton'
 import { getConferenceLogoUrl } from '../leagues/conferenceLogos'
 import { listLeagues, resendVerification, ApiError } from '../api'
 
@@ -78,6 +79,7 @@ export function HomePage() {
             <Link to="/settings" className="text-xs text-slate-500 underline">
               Settings
             </Link>
+            <FeedbackButton />
             <button type="button" onClick={() => void logout()} className="text-xs text-slate-500 underline">
               Log out
             </button>

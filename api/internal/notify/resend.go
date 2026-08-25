@@ -44,6 +44,7 @@ type resendRequest struct {
 	Subject string   `json:"subject"`
 	HTML    string   `json:"html,omitempty"`
 	Text    string   `json:"text,omitempty"`
+	ReplyTo []string `json:"reply_to,omitempty"`
 }
 
 // ResendError wraps a non-2xx response with Resend's documented error
@@ -61,13 +62,21 @@ func (e *ResendError) Error() string {
 
 // Send POSTs one Resend email-send request per call.
 func (s *ResendEmailSender) Send(ctx context.Context, msg EmailMessage) error {
-	body, err := json.Marshal(resendRequest{
-		From:    s.from,
+	from := s.from
+	if msg.From != "" {
+		from = msg.From
+	}
+	reqBody := resendRequest{
+		From:    from,
 		To:      []string{msg.To},
 		Subject: msg.Subject,
 		HTML:    msg.HTML,
 		Text:    msg.Text,
-	})
+	}
+	if msg.ReplyTo != "" {
+		reqBody.ReplyTo = []string{msg.ReplyTo}
+	}
+	body, err := json.Marshal(reqBody)
 	if err != nil {
 		return fmt.Errorf("resend: marshal request: %w", err)
 	}

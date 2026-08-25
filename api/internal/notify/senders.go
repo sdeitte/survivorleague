@@ -39,6 +39,17 @@ type EmailMessage struct {
 	Subject string
 	Text    string
 	HTML    string
+	// ReplyTo, when set, is passed through to the provider's reply-to
+	// header — lets a recipient reply straight to a specific address
+	// (e.g. the submitter of a feedback email) instead of whatever To
+	// happens to be.
+	ReplyTo string
+	// From, when set, overrides the sender's configured default From
+	// address for this one message — e.g. a commissioner's league-wide
+	// broadcast goes out from a distinct noreply address rather than
+	// whatever RESEND_FROM_EMAIL is configured to for ordinary
+	// transactional email (invites, password reset, etc.).
+	From string
 }
 
 // EmailSender delivers a transactional email. Implementations:

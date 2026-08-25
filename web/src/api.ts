@@ -516,6 +516,35 @@ export async function previewInvite(code: string): Promise<InvitePreviewResponse
   return parseJsonOrThrow<InvitePreviewResponse>(res)
 }
 
+// sendFeedback forwards a message to the admin inbox (see the API's
+// handleSendFeedback) — used by the app-wide "Provide feedback" button.
+export async function sendFeedback(message: string): Promise<void> {
+  await apiFetch<{ message: string }>('/feedback', { method: 'POST', body: { message } })
+}
+
+export interface MemberEmail {
+  membership_id: string
+  email: string
+  display_name: string
+}
+
+// listMemberEmails is commissioner-only — the address book backing "copy
+// all emails" and the compose-broadcast screen. Regular members can't see
+// each other's emails anywhere else in the app either.
+export async function listMemberEmails(leagueId: string): Promise<MemberEmail[]> {
+  return apiFetch<MemberEmail[]>(`/leagues/${leagueId}/members/emails`)
+}
+
+// broadcastEmail sends one email to every current member of the league —
+// always resolves (even on partial failure); check each entry's `sent`
+// flag rather than a thrown ApiError, same contract as sendInvites.
+export async function broadcastEmail(
+  leagueId: string,
+  input: { subject: string; message: string },
+): Promise<InviteSendResult[]> {
+  return apiFetch<InviteSendResult[]>(`/leagues/${leagueId}/broadcast-email`, { method: 'POST', body: input })
+}
+
 export async function joinLeagueByCode(code: string, teamName: string): Promise<League> {
   return apiFetch<League>(`/invites/${encodeURIComponent(code)}/join`, {
     method: 'POST',

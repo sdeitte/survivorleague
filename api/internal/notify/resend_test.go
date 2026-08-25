@@ -68,6 +68,57 @@ func TestResendEmailSender_Send_RequestShape(t *testing.T) {
 	}
 }
 
+// TestResendEmailSender_Send_FromAndReplyToOverrides confirms
+// EmailMessage.From overrides the sender's configured default (used by
+// SendLeagueBroadcastEmail, which sends from a distinct noreply address
+// rather than RESEND_FROM_EMAIL) and ReplyTo is passed through only when
+// set (used by SendFeedbackEmail, so the admin can reply straight to the
+// submitter) — omitted from the request entirely otherwise, per
+// resendRequest's `omitempty` tag.
+func TestResendEmailSender_Send_FromAndReplyToOverrides(t *testing.T) {
+	var gotBody resendRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"x"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	sender := NewResendEmailSender(server.Client(), server.URL, "test-api-key", "Survivor League <notifications@example.com>")
+	err := sender.Send(context.Background(), EmailMessage{
+		To:      "admin@survivorleague.football",
+		Subject: "Survivor League feedback",
+		Text:    "Great app!",
+		ReplyTo: "player@example.com",
+		From:    "Survivor League <noreply@survivorleague.football>",
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	if gotBody.From != "Survivor League <noreply@survivorleague.football>" {
+		t.Errorf("From = %q, want the message-level override", gotBody.From)
+	}
+	if len(gotBody.ReplyTo) != 1 || gotBody.ReplyTo[0] != "player@example.com" {
+		t.Errorf("ReplyTo = %v, want [player@example.com]", gotBody.ReplyTo)
+	}
+
+	// A message with no ReplyTo set must omit the field entirely, not
+	// send an empty array.
+	gotBody = resendRequest{}
+	if err := sender.Send(context.Background(), EmailMessage{To: "x@example.com", Subject: "x", Text: "y"}); err != nil {
+		t.Fatalf("Send (no ReplyTo): %v", err)
+	}
+	if gotBody.ReplyTo != nil {
+		t.Errorf("ReplyTo = %v, want nil when not set", gotBody.ReplyTo)
+	}
+	if gotBody.From != "Survivor League <notifications@example.com>" {
+		t.Errorf("From = %q, want the sender's configured default when not overridden", gotBody.From)
+	}
+}
+
 // TestResendEmailSender_Send_ErrorResponse_ReturnsResendError mirrors
 // schedule's TestCFBDClient_NonOKStatus_ReturnsCFBDError pattern, using
 // Resend's documented error shape ({statusCode, name, message}).

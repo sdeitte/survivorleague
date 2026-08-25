@@ -601,6 +601,102 @@ func (a *API) handleSendInvites(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, results)
 }
 
+// maxBroadcastMessageLength is a sanity cap, not a design constraint —
+// mirrors internal/chat's identical reasoning for its own message-length
+// cap.
+const maxBroadcastMessageLength = 5000
+
+// handleListMemberEmails implements GET /leagues/:id/members/emails
+// (requireCommissioner). The commissioner-only address book: every
+// non-removed member's email, backing both the frontend's "copy all
+// emails" button and the compose-broadcast screen. Deliberately a
+// separate endpoint from GET .../members (member-visible, no email
+// column) rather than an added field there — a member's email is not
+// something every other member should be able to see.
+func (a *API) handleListMemberEmails(w http.ResponseWriter, r *http.Request) {
+	lc, ok := LeagueFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusForbidden, "not a member of this league")
+		return
+	}
+
+	rows, err := a.leaguesService.ListMemberEmails(r.Context(), lc.League.ID)
+	if err != nil {
+		log.Printf("list member emails: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to list member emails")
+		return
+	}
+
+	out := make([]memberEmailResponse, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, memberEmailResponse{
+			MembershipID: db.UUIDString(row.MembershipID),
+			Email:        row.Email,
+			DisplayName:  row.DisplayName,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleBroadcastEmail implements POST /leagues/:id/broadcast-email
+// (requireCommissioner). Sends one email to every current member of the
+// league from a fixed noreply address (see notify.Service.
+// SendLeagueBroadcastEmail) — deliberately not gated by RequireLeagueOpen,
+// since a commissioner may well want to email participants after closing
+// the league (e.g. a wrap-up message). Best-effort per recipient, same
+// reasoning as handleSendInvites: one bad/bounced address must not
+// silently swallow the rest of the league's emails.
+func (a *API) handleBroadcastEmail(w http.ResponseWriter, r *http.Request) {
+	lc, ok := LeagueFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusForbidden, "not a member of this league")
+		return
+	}
+
+	var req broadcastEmailRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	req.Subject = strings.TrimSpace(req.Subject)
+	req.Message = strings.TrimSpace(req.Message)
+	if req.Subject == "" {
+		writeError(w, http.StatusBadRequest, "subject is required")
+		return
+	}
+	if req.Message == "" {
+		writeError(w, http.StatusBadRequest, "message is required")
+		return
+	}
+	if len(req.Message) > maxBroadcastMessageLength {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("message is too long (max %d characters)", maxBroadcastMessageLength))
+		return
+	}
+	if a.notifyService == nil {
+		writeError(w, http.StatusInternalServerError, "email delivery is not configured")
+		return
+	}
+
+	members, err := a.leaguesService.ListMemberEmails(r.Context(), lc.League.ID)
+	if err != nil {
+		log.Printf("broadcast email: list members: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to load league members")
+		return
+	}
+
+	results := make([]inviteSendResultResponse, 0, len(members))
+	for _, m := range members {
+		if err := a.notifyService.SendLeagueBroadcastEmail(r.Context(), m.Email, m.DisplayName, lc.League.Name, req.Subject, req.Message); err != nil {
+			log.Printf("broadcast email to %s: %v", m.Email, err)
+			results = append(results, inviteSendResultResponse{Email: m.Email, Sent: false, Error: "failed to send email"})
+			continue
+		}
+		results = append(results, inviteSendResultResponse{Email: m.Email, Sent: true})
+	}
+
+	writeJSON(w, http.StatusOK, results)
+}
+
 func (a *API) handlePreviewInvite(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")
 

@@ -161,7 +161,24 @@ func main() {
 	// post-Phase-10 password-reset/email-verification addition sends
 	// directly through it, independent of Phase 7's notification_outbox —
 	// see internal/auth/password_reset.go's doc comment for why.
-	emailSender := notify.NewResendEmailSender(http.DefaultClient, resendBaseURL, resendAPIKey, resendFromEmail)
+	//
+	// Real delivery is opt-in outside production: a local/dev process left
+	// running for days pointed at a local database with a real
+	// RESEND_API_KEY configured once silently turned every test run's
+	// generated outbox rows (synthetic @example.test addresses included)
+	// into real Resend sends, burning through the account's quota with
+	// nobody aware it was even running. APP_ENV=production is required for
+	// notify.NewResendEmailSender's real network calls; anything else gets
+	// a LoggingEmailSender (logs what it would have sent, never touches
+	// the network) unless ALLOW_REAL_EMAIL_IN_DEV=true is explicitly set —
+	// e.g. to manually verify real Resend delivery from a local box.
+	var emailSender notify.EmailSender
+	if appEnv == "production" || getenv("ALLOW_REAL_EMAIL_IN_DEV", "") == "true" {
+		emailSender = notify.NewResendEmailSender(http.DefaultClient, resendBaseURL, resendAPIKey, resendFromEmail)
+	} else {
+		log.Printf("APP_ENV=%q (not \"production\") — using a logging-only email sender so this process can never send real email; set ALLOW_REAL_EMAIL_IN_DEV=true to override", appEnv)
+		emailSender = notify.NewLoggingEmailSender()
+	}
 	authService := auth.NewService(queries, pool, jwtIssuer, adminEmail, auth.WithEmailSender(emailSender), auth.WithWebBaseURL(webBaseURL))
 	cfbdClient := schedule.NewCFBDClient(http.DefaultClient, cfbdBaseURL, cfbdAPIKey)
 	scheduleService := schedule.NewService(queries, cfbdClient)

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import * as Dialog from '@radix-ui/react-dialog'
 import { BrandWordmark } from '../components/BrandWordmark'
+import { EmailParticipantsCard } from '../components/EmailParticipantsCard'
 import { LeaderboardList } from '../components/LeaderboardList'
 import { LeagueChat } from '../components/LeagueChat'
 import { getConferenceLogoUrl } from '../leagues/conferenceLogos'
@@ -390,6 +391,8 @@ export function LeagueDetailPage() {
             )}
           </div>
         )}
+
+        {isCommissioner && <EmailParticipantsCard leagueId={id!} />}
 
         {actionError && <p className="text-red-400 text-sm">{actionError}</p>}
 

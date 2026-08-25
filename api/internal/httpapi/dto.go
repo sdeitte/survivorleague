@@ -29,6 +29,24 @@ type updateMeRequest struct {
 	DisplayName string `json:"display_name"`
 }
 
+type feedbackRequest struct {
+	Message string `json:"message"`
+}
+
+// memberEmailResponse is one entry of GET .../members/emails
+// (requireCommissioner) — the commissioner-only address book backing
+// "copy all emails" and the compose screen on the frontend.
+type memberEmailResponse struct {
+	MembershipID string `json:"membership_id"`
+	Email        string `json:"email"`
+	DisplayName  string `json:"display_name"`
+}
+
+type broadcastEmailRequest struct {
+	Subject string `json:"subject"`
+	Message string `json:"message"`
+}
+
 type userResponse struct {
 	ID          string `json:"id"`
 	Email       string `json:"email"`

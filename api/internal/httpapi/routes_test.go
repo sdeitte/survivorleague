@@ -120,6 +120,8 @@ func TestRouteTable_CommissionerOnlyRoutesRequireCommissioner(t *testing.T) {
 		"POST /leagues/{id}/invite/regenerate":              false,
 		"POST /leagues/{id}/invite/send":                    false,
 		"DELETE /leagues/{id}/messages/{messageId}":         false,
+		"GET /leagues/{id}/members/emails":                  false,
+		"POST /leagues/{id}/broadcast-email":                false,
 	}
 
 	for _, e := range entries {
@@ -426,7 +428,9 @@ func TestRouteTable_PasswordResetAndEmailVerificationRoutes(t *testing.T) {
 // the plan's "Auth & RBAC" regression-guard pattern: device-token
 // registration and notification preferences are per-user data with no
 // league scoping, so (unlike /leagues/{id}/... routes) requireAuth alone
-// is the correct — and sufficient — guard, not requireLeagueMember.
+// is the correct — and sufficient — guard, not requireLeagueMember. Also
+// covers POST /feedback, which is the same shape of route (per-user, no
+// league scoping) even though it's not a notification setting itself.
 func TestRouteTable_NotificationRoutesRequireAuth(t *testing.T) {
 	entries := walkRoutes(t, buildTestRouter(t))
 
@@ -435,6 +439,7 @@ func TestRouteTable_NotificationRoutesRequireAuth(t *testing.T) {
 		"DELETE /me/device-tokens":         false,
 		"GET /me/notification-preferences": false,
 		"PUT /me/notification-preferences": false,
+		"POST /feedback":                   false,
 	}
 
 	for _, e := range entries {
