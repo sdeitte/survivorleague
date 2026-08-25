@@ -9,7 +9,7 @@ import (
 )
 
 // AccessTokenTTL is how long an issued access token is valid for.
-const AccessTokenTTL = 15 * time.Minute
+const AccessTokenTTL = 3 * time.Hour
 
 // ErrInvalidToken is returned for any access token that fails signature
 // verification, is expired, or is otherwise malformed. Callers should treat

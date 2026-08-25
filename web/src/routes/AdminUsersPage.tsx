@@ -139,7 +139,7 @@ export function AdminUsersPage() {
             <Dialog.Title className="text-lg font-semibold text-slate-100">Disable this account?</Dialog.Title>
             <Dialog.Description className="text-sm text-slate-400">
               {userToDisable?.display_name} ({userToDisable?.email}) will be unable to log in until re-enabled.
-              Any session already in progress stays valid for up to 15 minutes (access token expiry). This can
+              Any session already in progress stays valid for up to 3 hours (access token expiry). This can
               be undone at any time from this page.
             </Dialog.Description>
             <div className="flex gap-2">

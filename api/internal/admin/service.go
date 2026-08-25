@@ -224,9 +224,9 @@ func (s *Service) ListUsers(ctx context.Context, limit, offset int32) ([]gen.Lis
 // audit_log row. A disabled user is rejected at their next login attempt
 // (internal/auth.Service.Login checks status != 'active') — existing
 // sessions (already-issued access tokens) are NOT proactively revoked; the
-// access token's own 15-minute expiry is what bounds that window, matching
-// this codebase's existing refresh-token-rotation-only revocation model
-// (there's no access-token blocklist anywhere else in this API either).
+// access token's own TTL (auth.AccessTokenTTL) is what bounds that window,
+// matching this codebase's existing refresh-token-rotation-only revocation
+// model (there's no access-token blocklist anywhere else in this API either).
 // Idempotent: disabling an already-disabled user succeeds and still writes
 // an audit_log row (the attempt itself is what's being recorded), rather
 // than erroring.
