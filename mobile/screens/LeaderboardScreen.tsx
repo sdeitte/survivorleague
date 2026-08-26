@@ -84,7 +84,7 @@ function LeaderboardRow({
         <View style={styles.rowLeft}>
           <Text style={styles.rank}>{rank}</Text>
           <View>
-            <Text style={styles.name}>{entry.display_name}</Text>
+            <Text style={styles.name}>{entry.team_name || entry.display_name}</Text>
             {!entry.is_contestant && <Text style={styles.meta}>not playing</Text>}
           </View>
         </View>

@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { useAuth } from '../auth/AuthContext';
 import { BrandWordmark } from '../components/BrandWordmark';
+import { ChatSection } from '../components/ChatSection';
 import { getConferenceLogoUrl } from '../leagues/conferenceLogos';
 import * as api from '../api';
 import { ApiError, type Member } from '../api';
@@ -38,6 +39,7 @@ export function LeagueDetailScreen({
   const [closeConfirmText, setCloseConfirmText] = useState('');
   const [inviteRows, setInviteRows] = useState<{ name: string; email: string }[]>([{ name: '', email: '' }]);
   const [inviteResults, setInviteResults] = useState<api.InviteSendResult[] | null>(null);
+  const [teamNameDraft, setTeamNameDraft] = useState('');
 
   const leagueQuery = useQuery({
     queryKey: ['league', leagueId],
@@ -47,6 +49,14 @@ export function LeagueDetailScreen({
     queryKey: ['league', leagueId, 'members'],
     queryFn: () => authFetch((token) => api.listMembers(token, leagueId)),
   });
+  // 404 (no week has finalized yet) is expected/terminal, not worth
+  // retrying — same treatment web's identical query gives its 404 case.
+  const recapQuery = useQuery({
+    queryKey: ['league', leagueId, 'recap'],
+    queryFn: () => authFetch((token) => api.getLatestRecap(token, leagueId)),
+    retry: false,
+  });
+  const noRecapYet = recapQuery.error instanceof ApiError && recapQuery.error.status === 404;
 
   const isCommissioner = leagueQuery.data?.membership.role === 'commissioner';
 
@@ -92,6 +102,11 @@ export function LeagueDetailScreen({
       setCloseConfirmText('');
     },
     onError: (err) => setActionError(err instanceof ApiError ? err.message : 'Failed to close league.'),
+  });
+
+  const setTeamNameMutation = useMutation({
+    mutationFn: (teamName: string) => authFetch((token) => api.updateTeamName(token, leagueId, teamName)),
+    onSuccess: (updated) => queryClient.setQueryData(['league', leagueId], updated),
   });
 
   const updateInviteRow = (index: number, field: 'name' | 'email', value: string) => {
@@ -349,6 +364,15 @@ export function LeagueDetailScreen({
 
             {actionError && <Text style={styles.error}>{actionError}</Text>}
 
+            <ChatSection leagueId={leagueId} isCommissioner={isCommissioner} />
+
+            {recapQuery.data && !noRecapYet && (
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>This week's recap</Text>
+                <Text style={styles.recapBody}>{recapQuery.data.body}</Text>
+              </View>
+            )}
+
             <Text style={styles.sectionTitle}>Members</Text>
             {membersQuery.isLoading && <ActivityIndicator color="#f1f5f9" />}
             {membersQuery.error && (
@@ -361,7 +385,7 @@ export function LeagueDetailScreen({
         renderItem={({ item }) => (
           <View style={styles.memberRow}>
             <View>
-              <Text style={styles.memberName}>{item.display_name}</Text>
+              <Text style={styles.memberName}>{item.team_name || item.display_name}</Text>
               <Text style={styles.memberMeta}>
                 {item.role}
                 {!item.is_contestant && ' · not playing'}
@@ -453,6 +477,51 @@ export function LeagueDetailScreen({
                 </Text>
               </Pressable>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* One-time backfill prompt: only pre-existing memberships from
+          before team names were required can ever have a blank one — a
+          new join/create always sets one up front, so this naturally
+          stops firing once every membership has a name. Non-dismissable
+          (no onRequestClose) since there's nothing sensible to fall back
+          to — every league now requires a team name. */}
+      <Modal visible={!league.membership.team_name} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Set your team name</Text>
+            <Text style={styles.modalDescription}>
+              Give your squad in {league.name} a name — it'll show up on the leaderboard, chat, and picks instead
+              of your player name.
+            </Text>
+            <TextInput
+              value={teamNameDraft}
+              onChangeText={setTeamNameDraft}
+              placeholder="Team name"
+              placeholderTextColor="#475569"
+              maxLength={60}
+              style={styles.modalInput}
+            />
+            {setTeamNameMutation.error && (
+              <Text style={styles.error}>
+                {setTeamNameMutation.error instanceof ApiError
+                  ? setTeamNameMutation.error.message
+                  : 'Failed to save team name.'}
+              </Text>
+            )}
+            <Pressable
+              style={[
+                styles.modalConfirmButtonWide,
+                (!teamNameDraft.trim() || setTeamNameMutation.isPending) && styles.buttonDisabled,
+              ]}
+              disabled={!teamNameDraft.trim() || setTeamNameMutation.isPending}
+              onPress={() => setTeamNameMutation.mutate(teamNameDraft)}
+            >
+              <Text style={styles.modalConfirmButtonText}>
+                {setTeamNameMutation.isPending ? 'Saving…' : 'Save team name'}
+              </Text>
+            </Pressable>
           </View>
         </View>
       </Modal>
@@ -568,6 +637,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     marginBottom: 8,
+  },
+  recapBody: {
+    color: '#cbd5e1',
+    fontSize: 13,
+    lineHeight: 18,
   },
   inviteRow: {
     flexDirection: 'row',
@@ -778,6 +852,12 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 8,
     backgroundColor: '#dc2626',
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  modalConfirmButtonWide: {
+    borderRadius: 8,
+    backgroundColor: '#059669',
     paddingVertical: 10,
     alignItems: 'center',
   },

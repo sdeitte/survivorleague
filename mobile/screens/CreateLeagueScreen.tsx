@@ -34,7 +34,7 @@ export function CreateLeagueScreen({
     formState: { errors, isSubmitting },
   } = useForm<CreateLeagueFormValues>({
     resolver: zodResolver(createLeagueSchema),
-    defaultValues: { name: '', season_year: new Date().getFullYear(), conference: '' },
+    defaultValues: { name: '', season_year: new Date().getFullYear(), conference: '', team_name: '' },
   });
 
   const onSubmit = async (values: CreateLeagueFormValues) => {
@@ -122,6 +122,18 @@ export function CreateLeagueScreen({
               : 'Could not load conferences. Try reloading the app.'}
           </Text>
         )}
+      </View>
+
+      <View style={styles.field}>
+        <Text style={styles.label}>Your team name</Text>
+        <Controller
+          control={control}
+          name="team_name"
+          render={({ field: { onChange, onBlur, value } }) => (
+            <TextInput style={styles.input} onBlur={onBlur} onChangeText={onChange} value={value} />
+          )}
+        />
+        {errors.team_name && <Text style={styles.error}>{errors.team_name.message}</Text>}
       </View>
 
       {serverError && <Text style={styles.error}>{serverError}</Text>}

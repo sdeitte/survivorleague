@@ -31,7 +31,7 @@ export function RegisterScreen({ onNavigateToLogin }: { onNavigateToLogin: () =>
       <Text style={styles.subtitle}>Survivor League</Text>
 
       <View style={styles.field}>
-        <Text style={styles.label}>Display name</Text>
+        <Text style={styles.label}>Player name</Text>
         <Controller
           control={control}
           name="display_name"

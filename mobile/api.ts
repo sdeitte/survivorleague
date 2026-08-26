@@ -122,6 +122,11 @@ export interface MembershipSummary {
   role: 'commissioner' | 'player';
   is_contestant: boolean;
   status: 'active' | 'eliminated';
+  // Per-league squad name, set at join/create and editable anytime — see
+  // updateTeamName. Empty until set; only pre-existing memberships from
+  // before this shipped can ever have a blank one, which is what backs
+  // the one-time backfill prompt on LeagueDetailScreen.
+  team_name?: string;
 }
 
 export interface League {
@@ -139,6 +144,7 @@ export interface Member {
   membership_id: string;
   user_id: string;
   display_name: string;
+  team_name?: string;
   role: 'commissioner' | 'player';
   is_contestant: boolean;
   status: 'active' | 'eliminated';
@@ -235,6 +241,7 @@ export interface AvailableTeamsResponse {
 export interface MemberPickStatus {
   membership_id: string;
   display_name: string;
+  team_name?: string;
   has_picked: boolean;
   game_id?: string;
   team_id?: string;
@@ -245,6 +252,7 @@ export interface MemberPickStatus {
 export interface LeaderboardEntry {
   membership_id: string;
   display_name: string;
+  team_name?: string;
   status: 'active' | 'eliminated';
   is_contestant: boolean;
   eliminated_week_id?: string;
@@ -402,9 +410,21 @@ export async function listConferences(): Promise<string[]> {
 
 export async function createLeague(
   accessToken: string,
-  input: { name: string; season_year: number; conference: string },
+  input: { name: string; season_year: number; conference: string; team_name: string },
 ): Promise<League> {
   const res = await rawFetch('/leagues', { method: 'POST', body: input, accessToken });
+  return parseJsonOrThrow<League>(res);
+}
+
+// updateTeamName sets or changes the caller's own team name in one
+// league — backs both the one-time backfill prompt (for memberships from
+// before team names were required) and any later rename.
+export async function updateTeamName(accessToken: string, leagueId: string, teamName: string): Promise<League> {
+  const res = await rawFetch(`/leagues/${leagueId}/team-name`, {
+    method: 'PATCH',
+    body: { team_name: teamName },
+    accessToken,
+  });
   return parseJsonOrThrow<League>(res);
 }
 
@@ -489,8 +509,12 @@ export async function previewInvite(code: string): Promise<InvitePreviewResponse
   return parseJsonOrThrow<InvitePreviewResponse>(res);
 }
 
-export async function joinLeagueByCode(accessToken: string, code: string): Promise<League> {
-  const res = await rawFetch(`/invites/${encodeURIComponent(code)}/join`, { method: 'POST', accessToken });
+export async function joinLeagueByCode(accessToken: string, code: string, teamName: string): Promise<League> {
+  const res = await rawFetch(`/invites/${encodeURIComponent(code)}/join`, {
+    method: 'POST',
+    body: { team_name: teamName },
+    accessToken,
+  });
   return parseJsonOrThrow<League>(res);
 }
 
@@ -576,6 +600,49 @@ export async function listMembershipPicks(
 ): Promise<MembershipWeekPick[]> {
   const res = await rawFetch(`/leagues/${leagueId}/members/${membershipId}/picks`, { accessToken });
   return parseJsonOrThrow<MembershipWeekPick[]>(res);
+}
+
+// --- League chat ---
+
+export interface ChatMessage {
+  id: string;
+  display_name: string;
+  team_name?: string;
+  body: string;
+  created_at: string;
+}
+
+// listMessages returns the last 7 days only — the server enforces this
+// (see internal/chat.Service), never returns older messages regardless
+// of how far back a caller might expect.
+export async function listMessages(accessToken: string, leagueId: string): Promise<ChatMessage[]> {
+  const res = await rawFetch(`/leagues/${leagueId}/messages`, { accessToken });
+  return parseJsonOrThrow<ChatMessage[]>(res);
+}
+
+export async function postMessage(accessToken: string, leagueId: string, body: string): Promise<ChatMessage> {
+  const res = await rawFetch(`/leagues/${leagueId}/messages`, { method: 'POST', body: { body }, accessToken });
+  return parseJsonOrThrow<ChatMessage>(res);
+}
+
+export async function deleteMessage(accessToken: string, leagueId: string, messageId: string): Promise<void> {
+  const res = await rawFetch(`/leagues/${leagueId}/messages/${messageId}`, { method: 'DELETE', accessToken });
+  await parseJsonOrThrow<void>(res);
+}
+
+// --- Weekly recap ---
+
+export interface WeekRecap {
+  body: string;
+  generated_at: string;
+}
+
+// getLatestRecap throws ApiError with status 404 if no week has finalized
+// yet for this league — callers should treat that as "nothing to show,"
+// not an error.
+export async function getLatestRecap(accessToken: string, leagueId: string): Promise<WeekRecap> {
+  const res = await rawFetch(`/leagues/${leagueId}/recap`, { accessToken });
+  return parseJsonOrThrow<WeekRecap>(res);
 }
 
 // --- Notifications (Phase 7) ---

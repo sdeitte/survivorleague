@@ -343,7 +343,7 @@ export function PicksScreen({ leagueId, onBack }: { leagueId: string; onBack: ()
               )}
               {weekPicksQuery.data?.map((status) => (
                 <View key={status.membership_id} style={styles.pickStatusRow}>
-                  <Text style={styles.memberName}>{status.display_name}</Text>
+                  <Text style={styles.memberName}>{status.team_name || status.display_name}</Text>
                   {status.has_picked ? (
                     status.team_id ? (
                       <View style={styles.pickedTeamRow}>

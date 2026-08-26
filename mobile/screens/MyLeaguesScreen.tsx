@@ -63,6 +63,7 @@ export function MyLeaguesScreen({
   onNavigateToLeague,
   onNavigateToHealth,
   onNavigateToNotificationPreferences,
+  onNavigateToSettings,
   onNavigateToAdmin,
 }: {
   onNavigateToCreate: () => void;
@@ -70,6 +71,7 @@ export function MyLeaguesScreen({
   onNavigateToLeague: (leagueId: string) => void;
   onNavigateToHealth: () => void;
   onNavigateToNotificationPreferences: () => void;
+  onNavigateToSettings: () => void;
   /** Present only for a signed-in site admin (see App.tsx). */
   onNavigateToAdmin?: () => void;
 }) {
@@ -87,9 +89,14 @@ export function MyLeaguesScreen({
       </View>
       <View style={styles.header}>
         <Text style={styles.subtitle}>Signed in as {user?.display_name}</Text>
-        <Pressable onPress={() => void logout()}>
-          <Text style={styles.link}>Log out</Text>
-        </Pressable>
+        <View style={styles.headerLinks}>
+          <Pressable onPress={onNavigateToSettings}>
+            <Text style={styles.link}>Settings</Text>
+          </Pressable>
+          <Pressable onPress={() => void logout()}>
+            <Text style={styles.link}>Log out</Text>
+          </Pressable>
+        </View>
       </View>
 
       {user && user.email_verified_at === null && <VerifyEmailBanner />}
@@ -182,6 +189,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  headerLinks: {
+    flexDirection: 'row',
+    gap: 12,
   },
   subtitle: {
     color: '#94a3b8',

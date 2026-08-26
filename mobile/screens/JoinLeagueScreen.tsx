@@ -6,7 +6,7 @@ import { useAuth } from '../auth/AuthContext';
 import { BrandWordmark } from '../components/BrandWordmark';
 import * as api from '../api';
 import { ApiError, type InvitePreviewResponse } from '../api';
-import { joinCodeSchema, type JoinCodeFormValues } from '../leagues/schemas';
+import { joinCodeSchema, confirmJoinSchema, type JoinCodeFormValues, type ConfirmJoinFormValues } from '../leagues/schemas';
 
 // Enter a code -> preview the league it invites to -> confirm -> join ->
 // navigate to the league. Mirrors web/src/routes/JoinLeaguePage.tsx.
@@ -28,6 +28,12 @@ export function JoinLeagueScreen({
     formState: { errors, isSubmitting },
   } = useForm<JoinCodeFormValues>({ resolver: zodResolver(joinCodeSchema) });
 
+  const {
+    control: joinControl,
+    handleSubmit: handleJoinSubmit,
+    formState: { errors: joinErrors },
+  } = useForm<ConfirmJoinFormValues>({ resolver: zodResolver(confirmJoinSchema), defaultValues: { team_name: '' } });
+
   const onPreview = async (values: JoinCodeFormValues) => {
     setServerError(null);
     try {
@@ -44,12 +50,12 @@ export function JoinLeagueScreen({
     }
   };
 
-  const onConfirmJoin = async () => {
+  const onConfirmJoin = async (values: ConfirmJoinFormValues) => {
     if (!preview) return;
     setServerError(null);
     setIsJoining(true);
     try {
-      const league = await authFetch((token) => api.joinLeagueByCode(token, preview.code));
+      const league = await authFetch((token) => api.joinLeagueByCode(token, preview.code, values.team_name));
       onJoined(league.id);
     } catch (err) {
       setServerError(
@@ -132,24 +138,37 @@ export function JoinLeagueScreen({
               </Pressable>
             </>
           ) : (
-            <View style={styles.row}>
-              <Pressable
-                style={[styles.buttonOutline, styles.rowButton]}
-                onPress={() => {
-                  setPreview(null);
-                  setServerError(null);
-                }}
-              >
-                <Text style={styles.buttonOutlineText}>Back</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.button, styles.rowButton, isJoining && styles.buttonDisabled]}
-                onPress={() => void onConfirmJoin()}
-                disabled={isJoining}
-              >
-                {isJoining ? <ActivityIndicator color="#0f172a" /> : <Text style={styles.buttonText}>Join league</Text>}
-              </Pressable>
-            </View>
+            <>
+              <View style={styles.field}>
+                <Text style={styles.label}>Your team name</Text>
+                <Controller
+                  control={joinControl}
+                  name="team_name"
+                  render={({ field: { onChange, onBlur, value } }) => (
+                    <TextInput style={styles.input} onBlur={onBlur} onChangeText={onChange} value={value} />
+                  )}
+                />
+                {joinErrors.team_name && <Text style={styles.error}>{joinErrors.team_name.message}</Text>}
+              </View>
+              <View style={styles.row}>
+                <Pressable
+                  style={[styles.buttonOutline, styles.rowButton]}
+                  onPress={() => {
+                    setPreview(null);
+                    setServerError(null);
+                  }}
+                >
+                  <Text style={styles.buttonOutlineText}>Back</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.button, styles.rowButton, isJoining && styles.buttonDisabled]}
+                  onPress={() => void handleJoinSubmit(onConfirmJoin)()}
+                  disabled={isJoining}
+                >
+                  {isJoining ? <ActivityIndicator color="#0f172a" /> : <Text style={styles.buttonText}>Join league</Text>}
+                </Pressable>
+              </View>
+            </>
           )}
         </>
       )}
