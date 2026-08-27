@@ -8,7 +8,10 @@
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "football.survivorleague.app"
+      "bundleIdentifier": "football.survivorleague.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "football.survivorleague.app",
@@ -27,6 +30,12 @@
       "expo-secure-store",
       "expo-notifications",
       "expo-font"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "05d57c83-cb5d-44c3-b4d7-1cb327fc5af4"
+      }
+    },
+    "owner": "survivor-league"
   }
 }

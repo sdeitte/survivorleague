@@ -3,6 +3,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { Controller, useForm } from 'react-hook-form';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useAuth } from '../auth/AuthContext';
+import { BrandWordmark } from '../components/BrandWordmark';
 import { loginSchema, type LoginFormValues } from '../auth/schemas';
 import { ApiError } from '../api';
 
@@ -33,6 +34,10 @@ export function LoginScreen({
 
   return (
     <View style={styles.container}>
+      <View style={styles.brandRow}>
+        <BrandWordmark size={260} />
+      </View>
+
       <Text style={styles.title}>Log in</Text>
       <Text style={styles.subtitle}>Survivor League</Text>
 
@@ -97,6 +102,10 @@ export function LoginScreen({
 }
 
 const styles = StyleSheet.create({
+  brandRow: {
+    alignItems: 'center',
+    marginBottom: 12,
+  },
   container: {
     flex: 1,
     backgroundColor: '#0f172a',
