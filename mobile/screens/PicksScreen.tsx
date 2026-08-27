@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ActivityIndicator, FlatList, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../auth/AuthContext';
 import { BrandWordmark } from '../components/BrandWordmark';
 import * as api from '../api';
@@ -165,7 +166,8 @@ export function PicksScreen({ leagueId, onBack }: { leagueId: string; onBack: ()
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <SafeAreaView style={styles.container} edges={['top']}>
+    <ScrollView contentContainerStyle={styles.content}>
       <View style={styles.brandRow}>
         <BrandWordmark size={90} />
       </View>
@@ -323,6 +325,16 @@ export function PicksScreen({ leagueId, onBack }: { leagueId: string; onBack: ()
                       })}
                     </Text>
                     {reason && <Text style={styles.reasonText}>{reason}</Text>}
+                    {team.win_probability !== undefined ? (
+                      <Text style={styles.predictorText}>
+                        {Math.round(team.win_probability * 100)}% to win
+                        {team.spread !== undefined && ` · ${team.spread > 0 ? '+' : ''}${team.spread}`}
+                      </Text>
+                    ) : team.sp_plus_rank !== undefined && team.opponent_sp_plus_rank !== undefined ? (
+                      <Text style={styles.predictorText}>
+                        SP+ #{team.sp_plus_rank} vs #{team.opponent_sp_plus_rank}
+                      </Text>
+                    ) : null}
                   </View>
                   {team.is_locked && <Text style={styles.lockedBadge}>Locked</Text>}
                 </Pressable>
@@ -367,6 +379,7 @@ export function PicksScreen({ leagueId, onBack }: { leagueId: string; onBack: ()
         </>
       )}
     </ScrollView>
+    </SafeAreaView>
   );
 }
 
@@ -591,6 +604,11 @@ const styles = StyleSheet.create({
   },
   reasonText: {
     color: '#f59e0b',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  predictorText: {
+    color: '#94a3b8',
     fontSize: 12,
     marginTop: 2,
   },

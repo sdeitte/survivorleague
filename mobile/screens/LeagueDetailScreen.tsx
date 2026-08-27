@@ -2,11 +2,10 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ActivityIndicator,
-  Alert,
-  FlatList,
   Image,
   Modal,
   Pressable,
+  ScrollView,
   Share,
   StyleSheet,
   Switch,
@@ -14,12 +13,13 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../auth/AuthContext';
 import { BrandWordmark } from '../components/BrandWordmark';
 import { ChatSection } from '../components/ChatSection';
 import { getConferenceLogoUrl } from '../leagues/conferenceLogos';
 import * as api from '../api';
-import { ApiError, type Member } from '../api';
+import { ApiError } from '../api';
 
 export function LeagueDetailScreen({
   leagueId,
@@ -44,10 +44,6 @@ export function LeagueDetailScreen({
   const leagueQuery = useQuery({
     queryKey: ['league', leagueId],
     queryFn: () => authFetch((token) => api.getLeague(token, leagueId)),
-  });
-  const membersQuery = useQuery({
-    queryKey: ['league', leagueId, 'members'],
-    queryFn: () => authFetch((token) => api.listMembers(token, leagueId)),
   });
   // 404 (no week has finalized yet) is expected/terminal, not worth
   // retrying — same treatment web's identical query gives its 404 case.
@@ -77,21 +73,6 @@ export function LeagueDetailScreen({
       authFetch((token) => api.updateLeague(token, leagueId, { commissioner_is_contestant: isContestant })),
     onSuccess: (league) => queryClient.setQueryData(['league', leagueId], league),
     onError: (err) => setActionError(err instanceof ApiError ? err.message : 'Failed to update league.'),
-  });
-
-  const removeMemberMutation = useMutation({
-    mutationFn: (membershipId: string) => authFetch((token) => api.removeMember(token, leagueId, membershipId)),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['league', leagueId, 'members'] }),
-    onError: (err) => setActionError(err instanceof ApiError ? err.message : 'Failed to remove member.'),
-  });
-
-  const buyBackMutation = useMutation({
-    mutationFn: (membershipId: string) => authFetch((token) => api.buyBackMember(token, leagueId, membershipId)),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['league', leagueId, 'members'] });
-      void queryClient.invalidateQueries({ queryKey: ['league', leagueId, 'leaderboard'] });
-    },
-    onError: (err) => setActionError(err instanceof ApiError ? err.message : 'Failed to buy back member.'),
   });
 
   const closeMutation = useMutation({
@@ -126,35 +107,6 @@ export function LeagueDetailScreen({
     },
     onError: (err) => setActionError(err instanceof ApiError ? err.message : 'Failed to send invites.'),
   });
-
-  const confirmRemove = (member: Member) => {
-    Alert.alert(
-      'Remove member?',
-      `${member.display_name} will lose access to this league. They can rejoin later with the invite code.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: () => removeMemberMutation.mutate(member.membership_id),
-        },
-      ],
-    );
-  };
-
-  const confirmBuyBack = (member: Member) => {
-    Alert.alert(
-      'Buy back this member?',
-      `${member.display_name} will be reinstated as an active contestant. This is a one-time lifeline per member — it cannot be undone or used again for them, even if they're eliminated again later. Their previously-used teams stay locked.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Buy back',
-          onPress: () => buyBackMutation.mutate(member.membership_id),
-        },
-      ],
-    );
-  };
 
   const shareInviteCode = async () => {
     if (!inviteQuery.data || !leagueQuery.data) return;
@@ -199,7 +151,7 @@ export function LeagueDetailScreen({
   const inviteJoinable = inviteQuery.data?.joinable ?? true;
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.brandRow}>
         <BrandWordmark size={90} />
       </View>
@@ -208,11 +160,7 @@ export function LeagueDetailScreen({
         <Text style={styles.backLink}>← My Leagues</Text>
       </Pressable>
 
-      <FlatList<Member>
-        data={membersQuery.data ?? []}
-        keyExtractor={(item) => item.membership_id}
-        ListHeaderComponent={
-          <>
+      <ScrollView style={styles.scrollView}>
             {isClosed && (
               <View style={styles.closedBanner}>
                 <Text style={styles.closedBannerTitle}>This league is closed</Text>
@@ -373,58 +321,19 @@ export function LeagueDetailScreen({
               </View>
             )}
 
-            <Text style={styles.sectionTitle}>Members</Text>
-            {membersQuery.isLoading && <ActivityIndicator color="#f1f5f9" />}
-            {membersQuery.error && (
-              <Text style={styles.error}>
-                {membersQuery.error instanceof ApiError ? membersQuery.error.message : 'Could not load members.'}
-              </Text>
-            )}
-          </>
-        }
-        renderItem={({ item }) => (
-          <View style={styles.memberRow}>
-            <View>
-              <Text style={styles.memberName}>{item.team_name || item.display_name}</Text>
-              <Text style={styles.memberMeta}>
-                {item.role}
-                {!item.is_contestant && ' · not playing'}
-                {item.status === 'eliminated' && ' · eliminated'}
-              </Text>
-            </View>
-            <View style={styles.memberActions}>
-              {isCommissioner && !isClosed && item.status === 'eliminated' && (
-                item.bought_back ? (
-                  <Text style={styles.buyBackUsedText}>Buy-back already used</Text>
-                ) : (
-                  <Pressable onPress={() => confirmBuyBack(item)}>
-                    <Text style={styles.buyBackLink}>Buy back</Text>
-                  </Pressable>
-                )
-              )}
-              {isCommissioner && !isClosed && item.role !== 'commissioner' && (
-                <Pressable onPress={() => confirmRemove(item)}>
-                  <Text style={styles.removeLink}>Remove</Text>
+            {isCommissioner && !isClosed && (
+              <View style={styles.dangerZone}>
+                <Text style={styles.dangerZoneTitle}>Danger zone</Text>
+                <Text style={styles.dangerZoneSubtitle}>
+                  Closing this league locks it for everyone — no more picks, joins, or changes. This can't be undone
+                  by you, though nothing is deleted.
+                </Text>
+                <Pressable style={styles.dangerZoneButton} onPress={() => setCloseModalVisible(true)}>
+                  <Text style={styles.dangerZoneButtonText}>Close league</Text>
                 </Pressable>
-              )}
-            </View>
-          </View>
-        )}
-        ListFooterComponent={
-          isCommissioner && !isClosed ? (
-            <View style={styles.dangerZone}>
-              <Text style={styles.dangerZoneTitle}>Danger zone</Text>
-              <Text style={styles.dangerZoneSubtitle}>
-                Closing this league locks it for everyone — no more picks, joins, or changes. This can't be undone
-                by you, though nothing is deleted.
-              </Text>
-              <Pressable style={styles.dangerZoneButton} onPress={() => setCloseModalVisible(true)}>
-                <Text style={styles.dangerZoneButtonText}>Close league</Text>
-              </Pressable>
-            </View>
-          ) : null
-        }
-      />
+              </View>
+            )}
+      </ScrollView>
 
       <Modal
         visible={closeModalVisible}
@@ -525,7 +434,7 @@ export function LeagueDetailScreen({
           </View>
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -538,6 +447,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#0f172a',
     padding: 24,
     gap: 12,
+  },
+  scrollView: {
+    flex: 1,
   },
   loadingContainer: {
     flex: 1,
@@ -669,43 +581,6 @@ const styles = StyleSheet.create({
     color: '#f1f5f9',
     fontWeight: '600',
     fontSize: 13,
-  },
-  memberRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#1e293b',
-    borderRadius: 10,
-    padding: 14,
-    marginBottom: 8,
-  },
-  memberName: {
-    color: '#f1f5f9',
-    fontSize: 14,
-  },
-  memberMeta: {
-    color: '#94a3b8',
-    fontSize: 12,
-    marginTop: 2,
-  },
-  memberActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  removeLink: {
-    color: '#f87171',
-    fontSize: 12,
-    textDecorationLine: 'underline',
-  },
-  buyBackLink: {
-    color: '#34d399',
-    fontSize: 12,
-    textDecorationLine: 'underline',
-  },
-  buyBackUsedText: {
-    color: '#64748b',
-    fontSize: 12,
   },
   error: {
     color: '#f87171',

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ActivityIndicator, FlatList, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../auth/AuthContext';
 import { BrandWordmark } from '../components/BrandWordmark';
 import { getConferenceLogoUrl } from '../leagues/conferenceLogos';
@@ -83,7 +84,7 @@ export function MyLeaguesScreen({
   });
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.brandRow}>
         <BrandWordmark size={138} />
       </View>
@@ -171,7 +172,7 @@ export function MyLeaguesScreen({
           <Text style={styles.linkAdmin}>Site admin</Text>
         </Pressable>
       )}
-    </View>
+    </SafeAreaView>
   );
 }
 

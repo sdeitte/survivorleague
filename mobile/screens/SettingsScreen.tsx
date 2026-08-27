@@ -3,6 +3,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation } from '@tanstack/react-query';
 import { Controller, useForm } from 'react-hook-form';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../auth/AuthContext';
 import { BrandWordmark } from '../components/BrandWordmark';
 import * as api from '../api';
@@ -39,7 +40,8 @@ export function SettingsScreen({ onBack }: { onBack: () => void }) {
   });
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <SafeAreaView style={styles.container} edges={['top']}>
+    <ScrollView contentContainerStyle={styles.content}>
       <View style={styles.brandRow}>
         <BrandWordmark size={90} />
       </View>
@@ -81,6 +83,7 @@ export function SettingsScreen({ onBack }: { onBack: () => void }) {
         </View>
       </View>
     </ScrollView>
+    </SafeAreaView>
   );
 }
 

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Controller, useForm } from 'react-hook-form';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -71,7 +72,7 @@ export function JoinLeagueScreen({
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.brandRow}>
         <BrandWordmark size={90} />
       </View>
@@ -176,7 +177,7 @@ export function JoinLeagueScreen({
       <Pressable onPress={onCancel}>
         <Text style={styles.link}>Cancel</Text>
       </Pressable>
-    </View>
+    </SafeAreaView>
   );
 }
 
