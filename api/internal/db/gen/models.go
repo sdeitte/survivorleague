@@ -211,6 +211,7 @@ type Team struct {
 	LogoUrl    pgtype.Text        `json:"logo_url"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	IsFbs      bool               `json:"is_fbs"`
 }
 
 type TeamSpRating struct {

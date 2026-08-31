@@ -464,6 +464,76 @@ func TestService_SyncSeason_ExcludesKnownBadGames(t *testing.T) {
 	}
 }
 
+// TestService_SyncSeason_NonFBSOpponentStoredAsStub is the regression test
+// for the real production bug this covers: an FBS team's game against an
+// FCS opponent (e.g. a week-1 cupcake) was previously dropped entirely —
+// see resolveNonFBSOpponent's doc comment — leaving that FBS team with no
+// pickable game that week. Two games: one real FBS-vs-FCS game (must now
+// sync, with a minimal is_fbs=false stub row for the FCS side) and one
+// between two teams neither of which is FBS (must still be skipped, same
+// as before — CFBD's unfiltered GET /games includes plenty of games with
+// nothing to do with this app).
+func TestService_SyncSeason_NonFBSOpponentStoredAsStub(t *testing.T) {
+	q := newTestQueries(t)
+	year := uniqueSeasonYear()
+
+	gamesJSON := `[
+    {
+      "id": 301, "season": 2025, "week": 1, "seasonType": "regular",
+      "startDate": "2025-08-30T17:00:00.000Z", "startTimeTBD": false, "completed": false,
+      "homeId": 1, "homeTeam": "Ohio State", "homeConference": "Big Ten", "homeClassification": "fbs", "homePoints": null,
+      "awayId": 501, "awayTeam": "Indiana State", "awayConference": "MVFC", "awayClassification": "fcs", "awayPoints": null
+    },
+    {
+      "id": 302, "season": 2025, "week": 1, "seasonType": "regular",
+      "startDate": "2025-08-30T17:00:00.000Z", "startTimeTBD": false, "completed": false,
+      "homeId": 502, "homeTeam": "Random FCS Team A", "homeConference": "CAA", "homeClassification": "fcs", "homePoints": null,
+      "awayId": 503, "awayTeam": "Random FCS Team B", "awayConference": "CAA", "awayClassification": "fcs", "awayPoints": null
+    }
+  ]`
+
+	fixture := newMutableFixtureServer(t, fixtureTeamsJSON, fixtureCalendarJSON, gamesJSON)
+	svc := fixture.service(t, q)
+
+	result, err := svc.SyncSeason(context.Background(), year)
+	if err != nil {
+		t.Fatalf("SyncSeason: %v", err)
+	}
+	if result.GamesUpserted != 1 {
+		t.Errorf("GamesUpserted = %d, want 1 (Ohio State vs Indiana State)", result.GamesUpserted)
+	}
+	if result.GamesSkipped != 1 {
+		t.Errorf("GamesSkipped = %d, want 1 (the FCS-vs-FCS game involving no FBS team we track)", result.GamesSkipped)
+	}
+	if len(result.SkippedGames) != 1 || result.SkippedGames[0].ExternalID != "302" {
+		t.Errorf("SkippedGames = %+v, want a single entry for external_id 302", result.SkippedGames)
+	}
+
+	stub, err := q.GetTeamByExternalID(context.Background(), "501")
+	if err != nil {
+		t.Fatalf("GetTeamByExternalID(501) (the FCS opponent stub): %v", err)
+	}
+	if stub.IsFbs {
+		t.Error("stub opponent team is_fbs = true, want false")
+	}
+	if stub.Name != "Indiana State" {
+		t.Errorf("stub opponent team name = %q, want %q", stub.Name, "Indiana State")
+	}
+	if stub.Conference != "MVFC" {
+		t.Errorf("stub opponent team conference = %q, want %q", stub.Conference, "MVFC")
+	}
+
+	// The stub must never leak into ListTeams (the picker/eligibility
+	// surface) — only real FBS teams belong there.
+	allTeams, err := q.ListTeams(context.Background(), pgtype.Text{})
+	if err != nil {
+		t.Fatalf("ListTeams: %v", err)
+	}
+	if _, found := findTeamByExternalID(allTeams, "501"); found {
+		t.Error("ListTeams includes the non-FBS stub team, want it excluded")
+	}
+}
+
 // TestNormalizeConference_UnmappedNameIsSurfacedNotDropped exercises the
 // normalization table's fallback path directly (no DB/HTTP needed): a raw
 // CFBD conference string with no table entry is still stored (never

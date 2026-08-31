@@ -378,7 +378,10 @@ type Querier interface {
 	// a team_id -> rating map, rather than re-joining per row.
 	ListTeamSPRatingsForSeason(ctx context.Context, seasonYear int32) ([]TeamSpRating, error)
 	// conference is an optional exact-match filter: pass a NULL narg to list
-	// every team, or a canonical conference name to filter to it.
+	// every team, or a canonical conference name to filter to it. Always
+	// scoped to is_fbs=true — a stub non-FBS opponent row (see
+	// UpsertNonFBSOpponentTeam) is an implementation detail of game storage,
+	// never a real, poolable team.
 	ListTeams(ctx context.Context, conference pgtype.Text) ([]Team, error)
 	// Every team_id currently sitting in one of this membership's picks for a
 	// week OTHER than the given one — regardless of whether that other pick's
@@ -530,6 +533,13 @@ type Querier interface {
 	//     treat "no rows" as "already a member" (409) — this also protects a
 	//     commissioner's own membership from ever being reset by this query.
 	UpsertLeagueMembershipOnJoin(ctx context.Context, arg UpsertLeagueMembershipOnJoinParams) (LeagueMembership, error)
+	// Minimal team row for a non-FBS opponent encountered while resolving an
+	// FBS team's game (see internal/schedule/sync.go's resolveNonFBSOpponent)
+	// — inserted only so the game itself can be stored (games.home_team_id/
+	// away_team_id are NOT NULL FKs into teams). On conflict, the existing row
+	// is returned untouched: this must never rename or downgrade a team that's
+	// also tracked as real via UpsertTeam (is_fbs=true stays true).
+	UpsertNonFBSOpponentTeam(ctx context.Context, arg UpsertNonFBSOpponentTeamParams) (Team, error)
 	// Writes the audit/dedupe record once a row's outcome is known (mirrors
 	// the outbox row's own dedupe_key 1:1, so this is always exactly one log
 	// row per outbox row). ON CONFLICT DO UPDATE (rather than DO NOTHING)
@@ -556,7 +566,10 @@ type Querier interface {
 	// Match/upsert on external_id (CFBD's team id) per the Phase 3 sync
 	// contract. conference is always the *normalized* name (mapped from
 	// CFBD's raw string by internal/schedule's normalization table before this
-	// is ever called) — never CFBD's raw string.
+	// is ever called) — never CFBD's raw string. Always sets is_fbs=true: this
+	// is the authoritative FBS sync path (driven by GET /teams/fbs), so it also
+	// promotes a row that resolveNonFBSOpponent previously created as a stub
+	// (see UpsertNonFBSOpponentTeam below) if CFBD ever reclassifies that team.
 	UpsertTeam(ctx context.Context, arg UpsertTeamParams) (Team, error)
 	// Match/upsert on (team_id, season_year) per game_predictions' same
 	// upsert-per-sync-run contract. Callers must never pass CFBD's synthetic

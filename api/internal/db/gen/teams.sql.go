@@ -12,7 +12,7 @@ import (
 )
 
 const getTeamByExternalID = `-- name: GetTeamByExternalID :one
-SELECT id, external_id, name, conference, logo_url, created_at, updated_at FROM teams WHERE external_id = $1
+SELECT id, external_id, name, conference, logo_url, created_at, updated_at, is_fbs FROM teams WHERE external_id = $1
 `
 
 // Backs RefreshWeek's team-id resolution: unlike SyncSeason (which
@@ -30,12 +30,13 @@ func (q *Queries) GetTeamByExternalID(ctx context.Context, externalID string) (T
 		&i.LogoUrl,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IsFbs,
 	)
 	return i, err
 }
 
 const getTeamByID = `-- name: GetTeamByID :one
-SELECT id, external_id, name, conference, logo_url, created_at, updated_at FROM teams WHERE id = $1
+SELECT id, external_id, name, conference, logo_url, created_at, updated_at, is_fbs FROM teams WHERE id = $1
 `
 
 func (q *Queries) GetTeamByID(ctx context.Context, id pgtype.UUID) (Team, error) {
@@ -49,12 +50,13 @@ func (q *Queries) GetTeamByID(ctx context.Context, id pgtype.UUID) (Team, error)
 		&i.LogoUrl,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IsFbs,
 	)
 	return i, err
 }
 
 const getTeamByName = `-- name: GetTeamByName :one
-SELECT id, external_id, name, conference, logo_url, created_at, updated_at FROM teams WHERE name = $1
+SELECT id, external_id, name, conference, logo_url, created_at, updated_at, is_fbs FROM teams WHERE name = $1
 `
 
 // Backs SyncSPRatings: CFBD's /ratings/sp response identifies teams by
@@ -73,6 +75,7 @@ func (q *Queries) GetTeamByName(ctx context.Context, name string) (Team, error) 
 		&i.LogoUrl,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IsFbs,
 	)
 	return i, err
 }
@@ -80,7 +83,7 @@ func (q *Queries) GetTeamByName(ctx context.Context, name string) (Team, error) 
 const listEligibleConferences = `-- name: ListEligibleConferences :many
 SELECT conference
 FROM teams
-WHERE conference != 'FBS Independents'
+WHERE conference != 'FBS Independents' AND is_fbs = true
 GROUP BY conference
 HAVING count(*) >= $1::int
 ORDER BY conference ASC
@@ -119,13 +122,17 @@ func (q *Queries) ListEligibleConferences(ctx context.Context, minTeams int32) (
 }
 
 const listTeams = `-- name: ListTeams :many
-SELECT id, external_id, name, conference, logo_url, created_at, updated_at FROM teams
-WHERE $1::text IS NULL OR conference = $1
+SELECT id, external_id, name, conference, logo_url, created_at, updated_at, is_fbs FROM teams
+WHERE is_fbs = true
+  AND ($1::text IS NULL OR conference = $1)
 ORDER BY name ASC
 `
 
 // conference is an optional exact-match filter: pass a NULL narg to list
-// every team, or a canonical conference name to filter to it.
+// every team, or a canonical conference name to filter to it. Always
+// scoped to is_fbs=true — a stub non-FBS opponent row (see
+// UpsertNonFBSOpponentTeam) is an implementation detail of game storage,
+// never a real, poolable team.
 func (q *Queries) ListTeams(ctx context.Context, conference pgtype.Text) ([]Team, error) {
 	rows, err := q.db.Query(ctx, listTeams, conference)
 	if err != nil {
@@ -143,6 +150,7 @@ func (q *Queries) ListTeams(ctx context.Context, conference pgtype.Text) ([]Team
 			&i.LogoUrl,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.IsFbs,
 		); err != nil {
 			return nil, err
 		}
@@ -154,15 +162,51 @@ func (q *Queries) ListTeams(ctx context.Context, conference pgtype.Text) ([]Team
 	return items, nil
 }
 
+const upsertNonFBSOpponentTeam = `-- name: UpsertNonFBSOpponentTeam :one
+INSERT INTO teams (external_id, name, conference, is_fbs, logo_url)
+VALUES ($1, $2, $3, false, NULL)
+ON CONFLICT (external_id) DO UPDATE SET external_id = teams.external_id
+RETURNING id, external_id, name, conference, logo_url, created_at, updated_at, is_fbs
+`
+
+type UpsertNonFBSOpponentTeamParams struct {
+	ExternalID string `json:"external_id"`
+	Name       string `json:"name"`
+	Conference string `json:"conference"`
+}
+
+// Minimal team row for a non-FBS opponent encountered while resolving an
+// FBS team's game (see internal/schedule/sync.go's resolveNonFBSOpponent)
+// — inserted only so the game itself can be stored (games.home_team_id/
+// away_team_id are NOT NULL FKs into teams). On conflict, the existing row
+// is returned untouched: this must never rename or downgrade a team that's
+// also tracked as real via UpsertTeam (is_fbs=true stays true).
+func (q *Queries) UpsertNonFBSOpponentTeam(ctx context.Context, arg UpsertNonFBSOpponentTeamParams) (Team, error) {
+	row := q.db.QueryRow(ctx, upsertNonFBSOpponentTeam, arg.ExternalID, arg.Name, arg.Conference)
+	var i Team
+	err := row.Scan(
+		&i.ID,
+		&i.ExternalID,
+		&i.Name,
+		&i.Conference,
+		&i.LogoUrl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.IsFbs,
+	)
+	return i, err
+}
+
 const upsertTeam = `-- name: UpsertTeam :one
-INSERT INTO teams (external_id, name, conference, logo_url)
-VALUES ($1, $2, $3, $4)
+INSERT INTO teams (external_id, name, conference, logo_url, is_fbs)
+VALUES ($1, $2, $3, $4, true)
 ON CONFLICT (external_id) DO UPDATE SET
     name = EXCLUDED.name,
     conference = EXCLUDED.conference,
     logo_url = EXCLUDED.logo_url,
+    is_fbs = true,
     updated_at = now()
-RETURNING id, external_id, name, conference, logo_url, created_at, updated_at
+RETURNING id, external_id, name, conference, logo_url, created_at, updated_at, is_fbs
 `
 
 type UpsertTeamParams struct {
@@ -175,7 +219,10 @@ type UpsertTeamParams struct {
 // Match/upsert on external_id (CFBD's team id) per the Phase 3 sync
 // contract. conference is always the *normalized* name (mapped from
 // CFBD's raw string by internal/schedule's normalization table before this
-// is ever called) — never CFBD's raw string.
+// is ever called) — never CFBD's raw string. Always sets is_fbs=true: this
+// is the authoritative FBS sync path (driven by GET /teams/fbs), so it also
+// promotes a row that resolveNonFBSOpponent previously created as a stub
+// (see UpsertNonFBSOpponentTeam below) if CFBD ever reclassifies that team.
 func (q *Queries) UpsertTeam(ctx context.Context, arg UpsertTeamParams) (Team, error) {
 	row := q.db.QueryRow(ctx, upsertTeam,
 		arg.ExternalID,
@@ -192,6 +239,7 @@ func (q *Queries) UpsertTeam(ctx context.Context, arg UpsertTeamParams) (Team, e
 		&i.LogoUrl,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IsFbs,
 	)
 	return i, err
 }

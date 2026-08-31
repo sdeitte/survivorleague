@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -203,11 +204,35 @@ func (s *Service) SyncSeason(ctx context.Context, year int) (SyncResult, error) 
 
 		homeTeamID, homeOK := teamIDByExternalID[fmt.Sprint(g.HomeID)]
 		awayTeamID, awayOK := teamIDByExternalID[fmt.Sprint(g.AwayID)]
+
+		// Only worth resolving the missing side as a non-FBS opponent stub
+		// when the OTHER side is already a confirmed FBS team we track —
+		// otherwise this is some entirely irrelevant game (e.g. two FCS
+		// teams playing each other) that CFBD's unfiltered GET /games
+		// happens to include, and must stay skipped exactly as before.
+		if !homeOK && awayOK {
+			if id, ok, rerr := s.resolveNonFBSOpponent(ctx, g.HomeID, g.HomeTeam, g.HomeConference, g.HomeClassification); rerr != nil {
+				return result, rerr
+			} else if ok {
+				homeTeamID, homeOK = id, true
+				teamIDByExternalID[fmt.Sprint(g.HomeID)] = id
+			}
+		}
+		if !awayOK && homeOK {
+			if id, ok, rerr := s.resolveNonFBSOpponent(ctx, g.AwayID, g.AwayTeam, g.AwayConference, g.AwayClassification); rerr != nil {
+				return result, rerr
+			} else if ok {
+				awayTeamID, awayOK = id, true
+				teamIDByExternalID[fmt.Sprint(g.AwayID)] = id
+			}
+		}
+
 		if !homeOK || !awayOK {
-			// One side isn't an FBS team synced above (e.g. an FBS-vs-FCS
-			// non-conference game) — teams.home_team_id/away_team_id are
-			// NOT NULL FKs into teams, and only FBS teams are stored, so
-			// this game cannot be represented. Skip rather than crash.
+			// One side isn't an FBS team synced above and CFBD didn't report
+			// it as a resolvable non-FBS opponent either (e.g. a game that
+			// doesn't involve any team we track at all) — teams.
+			// home_team_id/away_team_id are NOT NULL FKs into teams, so this
+			// game cannot be represented. Skip rather than crash.
 			result.SkippedGames = append(result.SkippedGames, SkippedGame{
 				ExternalID: externalID,
 				Reason:     "home or away team is not an FBS team in this sync (likely a non-FBS opponent)",
@@ -375,6 +400,36 @@ func (s *Service) SyncSPRatings(ctx context.Context, year int) (SPRatingSyncResu
 	return result, nil
 }
 
+// resolveNonFBSOpponent looks up/creates a teamID for a game participant
+// that isn't one of the FBS teams this sync already knows about. If CFBD
+// explicitly reports this participant as non-FBS (classification is
+// non-empty and not "fbs" — e.g. "fcs"), a minimal stub team row is
+// upserted (see UpsertNonFBSOpponentTeam) so the FBS side's game can still
+// be stored — the common "cupcake" case, e.g. an FBS team's week-1 game
+// against an FCS opponent. classification == "" (some older CFBD payloads
+// omit it) deliberately returns ok=false rather than guessing, so callers
+// keep the pre-existing skip behavior for genuinely ambiguous data.
+func (s *Service) resolveNonFBSOpponent(ctx context.Context, externalID int, name string, conference *string, classification string) (teamID pgtype.UUID, ok bool, err error) {
+	if classification == "" || strings.EqualFold(classification, "fbs") {
+		return pgtype.UUID{}, false, nil
+	}
+
+	conf := "FCS"
+	if conference != nil && *conference != "" {
+		conf = *conference
+	}
+
+	team, err := s.queries.UpsertNonFBSOpponentTeam(ctx, gen.UpsertNonFBSOpponentTeamParams{
+		ExternalID: fmt.Sprint(externalID),
+		Name:       name,
+		Conference: conf,
+	})
+	if err != nil {
+		return pgtype.UUID{}, false, fmt.Errorf("schedule: upsert non-FBS opponent team %d: %w", externalID, err)
+	}
+	return team.ID, true, nil
+}
+
 // numericFromFloat64 converts a plain float64 into a valid pgtype.Numeric
 // via its decimal text representation — pgtype.Numeric.Scan only accepts a
 // string (or nil), not a float64 directly.
@@ -488,29 +543,51 @@ func (s *Service) RefreshWeek(ctx context.Context, seasonYear, weekNumber int) (
 			continue
 		}
 
-		homeTeam, err := s.queries.GetTeamByExternalID(ctx, fmt.Sprint(g.HomeID))
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				result.SkippedGames = append(result.SkippedGames, SkippedGame{
-					ExternalID: externalID,
-					Reason:     "home team not found (not previously synced by a full SyncSeason)",
-				})
-				result.GamesSkipped++
-				continue
-			}
-			return result, fmt.Errorf("schedule: get home team for game %s: %w", externalID, err)
+		homeTeam, homeErr := s.queries.GetTeamByExternalID(ctx, fmt.Sprint(g.HomeID))
+		homeFound := homeErr == nil
+		if homeErr != nil && !errors.Is(homeErr, pgx.ErrNoRows) {
+			return result, fmt.Errorf("schedule: get home team for game %s: %w", externalID, homeErr)
 		}
-		awayTeam, err := s.queries.GetTeamByExternalID(ctx, fmt.Sprint(g.AwayID))
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				result.SkippedGames = append(result.SkippedGames, SkippedGame{
-					ExternalID: externalID,
-					Reason:     "away team not found (not previously synced by a full SyncSeason)",
-				})
-				result.GamesSkipped++
-				continue
+
+		awayTeam, awayErr := s.queries.GetTeamByExternalID(ctx, fmt.Sprint(g.AwayID))
+		awayFound := awayErr == nil
+		if awayErr != nil && !errors.Is(awayErr, pgx.ErrNoRows) {
+			return result, fmt.Errorf("schedule: get away team for game %s: %w", externalID, awayErr)
+		}
+
+		// Same "only resolve the missing side as a non-FBS opponent stub
+		// when the other side is a real, already-synced FBS team" gating as
+		// SyncSeason — see its comment above for why.
+		if !homeFound && awayFound && awayTeam.IsFbs {
+			if id, ok, rerr := s.resolveNonFBSOpponent(ctx, g.HomeID, g.HomeTeam, g.HomeConference, g.HomeClassification); rerr != nil {
+				return result, rerr
+			} else if ok {
+				homeTeam.ID, homeFound = id, true
 			}
-			return result, fmt.Errorf("schedule: get away team for game %s: %w", externalID, err)
+		}
+		if !awayFound && homeFound && homeTeam.IsFbs {
+			if id, ok, rerr := s.resolveNonFBSOpponent(ctx, g.AwayID, g.AwayTeam, g.AwayConference, g.AwayClassification); rerr != nil {
+				return result, rerr
+			} else if ok {
+				awayTeam.ID, awayFound = id, true
+			}
+		}
+
+		if !homeFound {
+			result.SkippedGames = append(result.SkippedGames, SkippedGame{
+				ExternalID: externalID,
+				Reason:     "home team not found (not previously synced by a full SyncSeason)",
+			})
+			result.GamesSkipped++
+			continue
+		}
+		if !awayFound {
+			result.SkippedGames = append(result.SkippedGames, SkippedGame{
+				ExternalID: externalID,
+				Reason:     "away team not found (not previously synced by a full SyncSeason)",
+			})
+			result.GamesSkipped++
+			continue
 		}
 
 		params, _, err := buildGameUpsertParams(g, week.ID, homeTeam.ID, awayTeam.ID)
@@ -572,13 +649,40 @@ func (s *Service) RefreshGame(ctx context.Context, gameID pgtype.UUID) (gen.Game
 			continue
 		}
 
-		homeTeam, err := s.queries.GetTeamByExternalID(ctx, fmt.Sprint(g.HomeID))
-		if err != nil {
-			return gen.Game{}, fmt.Errorf("schedule: get home team for game %s: %w", game.ExternalID, err)
+		homeTeam, homeErr := s.queries.GetTeamByExternalID(ctx, fmt.Sprint(g.HomeID))
+		if homeErr != nil && !errors.Is(homeErr, pgx.ErrNoRows) {
+			return gen.Game{}, fmt.Errorf("schedule: get home team for game %s: %w", game.ExternalID, homeErr)
 		}
-		awayTeam, err := s.queries.GetTeamByExternalID(ctx, fmt.Sprint(g.AwayID))
-		if err != nil {
-			return gen.Game{}, fmt.Errorf("schedule: get away team for game %s: %w", game.ExternalID, err)
+		awayTeam, awayErr := s.queries.GetTeamByExternalID(ctx, fmt.Sprint(g.AwayID))
+		if awayErr != nil && !errors.Is(awayErr, pgx.ErrNoRows) {
+			return gen.Game{}, fmt.Errorf("schedule: get away team for game %s: %w", game.ExternalID, awayErr)
+		}
+
+		// Same non-FBS-opponent-stub fallback as SyncSeason/RefreshWeek —
+		// see resolveNonFBSOpponent's doc comment.
+		if homeErr != nil && awayErr == nil && awayTeam.IsFbs {
+			id, ok, rerr := s.resolveNonFBSOpponent(ctx, g.HomeID, g.HomeTeam, g.HomeConference, g.HomeClassification)
+			if rerr != nil {
+				return gen.Game{}, rerr
+			}
+			if !ok {
+				return gen.Game{}, fmt.Errorf("schedule: get home team for game %s: %w", game.ExternalID, homeErr)
+			}
+			homeTeam.ID = id
+		} else if homeErr != nil {
+			return gen.Game{}, fmt.Errorf("schedule: get home team for game %s: %w", game.ExternalID, homeErr)
+		}
+		if awayErr != nil && homeTeam.IsFbs {
+			id, ok, rerr := s.resolveNonFBSOpponent(ctx, g.AwayID, g.AwayTeam, g.AwayConference, g.AwayClassification)
+			if rerr != nil {
+				return gen.Game{}, rerr
+			}
+			if !ok {
+				return gen.Game{}, fmt.Errorf("schedule: get away team for game %s: %w", game.ExternalID, awayErr)
+			}
+			awayTeam.ID = id
+		} else if awayErr != nil {
+			return gen.Game{}, fmt.Errorf("schedule: get away team for game %s: %w", game.ExternalID, awayErr)
 		}
 
 		params, _, err := buildGameUpsertParams(g, week.ID, homeTeam.ID, awayTeam.ID)

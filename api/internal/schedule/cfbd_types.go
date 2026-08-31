@@ -30,20 +30,31 @@ type cfbdCalendarWeek struct {
 
 // cfbdGame is CFBD's Game schema (GET /games), trimmed to the fields this
 // sync needs.
+//
+// HomeClassification/AwayClassification ("fbs", "fcs", "ii", "iii") back
+// resolveNonFBSOpponent's decision to synthesize a minimal opponent team
+// row rather than skip the game outright — see sync.go. They're absent
+// (empty string) in some older/hand-authored test fixtures, which
+// deliberately keeps resolveNonFBSOpponent conservative (skip, the
+// pre-existing behavior) rather than guessing.
 type cfbdGame struct {
-	ID           int    `json:"id"`
-	Season       int    `json:"season"`
-	Week         int    `json:"week"`
-	SeasonType   string `json:"seasonType"`
-	StartDate    string `json:"startDate"`
-	StartTimeTBD bool   `json:"startTimeTBD"`
-	Completed    bool   `json:"completed"`
-	HomeID       int    `json:"homeId"`
-	HomeTeam     string `json:"homeTeam"`
-	HomePoints   *int   `json:"homePoints"`
-	AwayID       int    `json:"awayId"`
-	AwayTeam     string `json:"awayTeam"`
-	AwayPoints   *int   `json:"awayPoints"`
+	ID                 int     `json:"id"`
+	Season             int     `json:"season"`
+	Week               int     `json:"week"`
+	SeasonType         string  `json:"seasonType"`
+	StartDate          string  `json:"startDate"`
+	StartTimeTBD       bool    `json:"startTimeTBD"`
+	Completed          bool    `json:"completed"`
+	HomeID             int     `json:"homeId"`
+	HomeTeam           string  `json:"homeTeam"`
+	HomeConference     *string `json:"homeConference"`
+	HomeClassification string  `json:"homeClassification"`
+	HomePoints         *int    `json:"homePoints"`
+	AwayID             int     `json:"awayId"`
+	AwayTeam           string  `json:"awayTeam"`
+	AwayConference     *string `json:"awayConference"`
+	AwayClassification string  `json:"awayClassification"`
+	AwayPoints         *int    `json:"awayPoints"`
 }
 
 // cfbdPregameWinProbability is CFBD's PregameWinProbability schema

@@ -2,21 +2,41 @@
 -- Match/upsert on external_id (CFBD's team id) per the Phase 3 sync
 -- contract. conference is always the *normalized* name (mapped from
 -- CFBD's raw string by internal/schedule's normalization table before this
--- is ever called) — never CFBD's raw string.
-INSERT INTO teams (external_id, name, conference, logo_url)
-VALUES (sqlc.arg(external_id), sqlc.arg(name), sqlc.arg(conference), sqlc.arg(logo_url))
+-- is ever called) — never CFBD's raw string. Always sets is_fbs=true: this
+-- is the authoritative FBS sync path (driven by GET /teams/fbs), so it also
+-- promotes a row that resolveNonFBSOpponent previously created as a stub
+-- (see UpsertNonFBSOpponentTeam below) if CFBD ever reclassifies that team.
+INSERT INTO teams (external_id, name, conference, logo_url, is_fbs)
+VALUES (sqlc.arg(external_id), sqlc.arg(name), sqlc.arg(conference), sqlc.arg(logo_url), true)
 ON CONFLICT (external_id) DO UPDATE SET
     name = EXCLUDED.name,
     conference = EXCLUDED.conference,
     logo_url = EXCLUDED.logo_url,
+    is_fbs = true,
     updated_at = now()
+RETURNING *;
+
+-- name: UpsertNonFBSOpponentTeam :one
+-- Minimal team row for a non-FBS opponent encountered while resolving an
+-- FBS team's game (see internal/schedule/sync.go's resolveNonFBSOpponent)
+-- — inserted only so the game itself can be stored (games.home_team_id/
+-- away_team_id are NOT NULL FKs into teams). On conflict, the existing row
+-- is returned untouched: this must never rename or downgrade a team that's
+-- also tracked as real via UpsertTeam (is_fbs=true stays true).
+INSERT INTO teams (external_id, name, conference, is_fbs, logo_url)
+VALUES (sqlc.arg(external_id), sqlc.arg(name), sqlc.arg(conference), false, NULL)
+ON CONFLICT (external_id) DO UPDATE SET external_id = teams.external_id
 RETURNING *;
 
 -- name: ListTeams :many
 -- conference is an optional exact-match filter: pass a NULL narg to list
--- every team, or a canonical conference name to filter to it.
+-- every team, or a canonical conference name to filter to it. Always
+-- scoped to is_fbs=true — a stub non-FBS opponent row (see
+-- UpsertNonFBSOpponentTeam) is an implementation detail of game storage,
+-- never a real, poolable team.
 SELECT * FROM teams
-WHERE sqlc.narg(conference)::text IS NULL OR conference = sqlc.narg(conference)
+WHERE is_fbs = true
+  AND (sqlc.narg(conference)::text IS NULL OR conference = sqlc.narg(conference))
 ORDER BY name ASC;
 
 -- name: GetTeamByID :one
@@ -37,7 +57,7 @@ SELECT * FROM teams WHERE id = sqlc.arg(id);
 -- normalization, not eligibility).
 SELECT conference
 FROM teams
-WHERE conference != 'FBS Independents'
+WHERE conference != 'FBS Independents' AND is_fbs = true
 GROUP BY conference
 HAVING count(*) >= sqlc.arg(min_teams)::int
 ORDER BY conference ASC;
