@@ -64,7 +64,21 @@ func NewClient(httpClient HTTPDoer, baseURL, apiKey, model string) *Client {
 type messagesRequest struct {
 	Model     string    `json:"model"`
 	MaxTokens int       `json:"max_tokens"`
+	Thinking  thinking  `json:"thinking"`
 	Messages  []message `json:"messages"`
+}
+
+// thinking explicitly turns off extended thinking for this call. Without
+// this, the model engages extended thinking by default and its tokens
+// count against MaxTokens — confirmed in production (2026-10-04): a
+// single unusually large recap prompt (a 14-person mass-elimination week)
+// pushed thinking alone to consume the entire 1024-token budget, hitting
+// stop_reason=max_tokens with zero text content ever produced. A plain
+// recap has no need for extended reasoning, so disabling it outright is
+// both the fix and the cheaper/faster choice, not just a bigger budget to
+// out-race the same risk on an even busier week.
+type thinking struct {
+	Type string `json:"type"`
 }
 
 type message struct {
@@ -111,6 +125,7 @@ func (c *Client) GenerateText(ctx context.Context, prompt string) (string, error
 	body, err := json.Marshal(messagesRequest{
 		Model:     c.model,
 		MaxTokens: defaultMaxTokens,
+		Thinking:  thinking{Type: "disabled"},
 		Messages:  []message{{Role: "user", Content: prompt}},
 	})
 	if err != nil {
