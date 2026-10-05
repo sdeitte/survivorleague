@@ -260,6 +260,20 @@ type Querier interface {
 	// doesn't need N+1 lookups. is_locked/is_used_elsewhere are computed by
 	// the service layer (the former against time.Now(), the latter against
 	// ListUsedTeamIDsForMembershipExcludingWeek's result), not this query.
+	//
+	// game_status/home_score/away_score are the authoritative, grading-owned
+	// fields (NULL score until status='final' — see buildGameUpsertParams in
+	// sync.go); live_status/live_home_score/live_away_score/live_period/
+	// live_clock are the separate cosmetic in-progress feed (see migration
+	// 00009), present only while live_status='in_progress', never consulted
+	// for grading. Both pairs are selected as the raw home/away columns
+	// (NOT a (g.home_team_id = t.id)-style CASE) for the same two reasons
+	// is_home below is: (1) sqlc's nullability inference doesn't reliably
+	// mark a CASE/comparison-derived column as nullable through this join —
+	// see ListWeekRecapFactsForLeague's identical note — and (2) the service
+	// layer already has is_home in hand to compute "this team's own score"
+	// itself (picks.Service.ListAvailableTeams), the same pattern
+	// internal/recap's scoreString uses.
 	ListAvailableTeamsForWeek(ctx context.Context, arg ListAvailableTeamsForWeekParams) ([]ListAvailableTeamsForWeekRow, error)
 	// Every game in the week where either team belongs to the given
 	// conference — the set TryFinalizeLeagueWeek must fully resolve (no
@@ -285,7 +299,9 @@ type Querier interface {
 	// available-teams query rather than modifying it.
 	ListGamePredictionsForWeek(ctx context.Context, weekID pgtype.UUID) ([]GamePrediction, error)
 	// Joined with both teams' name/conference/logo so clients don't need N+1
-	// lookups per the GET /weeks/:id/games contract.
+	// lookups per the GET /weeks/:id/games contract. live_* columns are the
+	// cosmetic in-progress score feed (see migration 00009) — status/
+	// home_score/away_score remain the authoritative, grading-owned fields.
 	ListGamesByWeekWithTeams(ctx context.Context, weekID pgtype.UUID) ([]ListGamesByWeekWithTeamsRow, error)
 	// Backs GET /leagues/:id/leaderboard. Every non-removed membership
 	// (contestants and manage-only commissioners alike — the API contract
@@ -491,6 +507,15 @@ type Querier interface {
 	// GradeGame's guard and leaving every pick on it stuck at 'pending' forever.
 	SeedFinalizeGame(ctx context.Context, arg SeedFinalizeGameParams) (Game, error)
 	UpdateCommissionerIsContestant(ctx context.Context, arg UpdateCommissionerIsContestantParams) (LeagueMembership, error)
+	// Backs internal/schedule.Service.RefreshLiveScores. Deliberately only
+	// touches the live_* columns (see migration 00009's doc comment) — never
+	// status/home_score/away_score/winner_team_id, which stay exclusively
+	// owned by the existing CFBD /games sync path that grading depends on.
+	// :exec (not :one) since a scoreboard row with no matching external_id in
+	// our games table — not every CFBD scoreboard game is one we track — is
+	// a silent no-op, not an error; the caller doesn't need the updated row
+	// back.
+	UpdateGameLiveState(ctx context.Context, arg UpdateGameLiveStateParams) error
 	UpdateLeagueInviteCode(ctx context.Context, arg UpdateLeagueInviteCodeParams) (League, error)
 	UpdateLeagueName(ctx context.Context, arg UpdateLeagueNameParams) (League, error)
 	// Backs PATCH /leagues/:id/team-name — a member setting/changing their own

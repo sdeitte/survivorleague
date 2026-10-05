@@ -26,10 +26,13 @@ RETURNING *;
 
 -- name: ListGamesByWeekWithTeams :many
 -- Joined with both teams' name/conference/logo so clients don't need N+1
--- lookups per the GET /weeks/:id/games contract.
+-- lookups per the GET /weeks/:id/games contract. live_* columns are the
+-- cosmetic in-progress score feed (see migration 00009) — status/
+-- home_score/away_score remain the authoritative, grading-owned fields.
 SELECT
     g.id, g.external_id, g.week_id, g.home_team_id, g.away_team_id, g.kickoff_at,
     g.status, g.home_score, g.away_score, g.winner_team_id, g.graded_at,
+    g.live_status, g.live_home_score, g.live_away_score, g.live_period, g.live_clock,
     g.created_at, g.updated_at,
     ht.name AS home_team_name, ht.conference AS home_team_conference, ht.logo_url AS home_team_logo_url,
     at.name AS away_team_name, at.conference AS away_team_conference, at.logo_url AS away_team_logo_url
@@ -43,6 +46,7 @@ ORDER BY g.kickoff_at ASC;
 SELECT
     g.id, g.external_id, g.week_id, g.home_team_id, g.away_team_id, g.kickoff_at,
     g.status, g.home_score, g.away_score, g.winner_team_id, g.graded_at,
+    g.live_status, g.live_home_score, g.live_away_score, g.live_period, g.live_clock,
     g.created_at, g.updated_at,
     ht.name AS home_team_name, ht.conference AS home_team_conference, ht.logo_url AS home_team_logo_url,
     at.name AS away_team_name, at.conference AS away_team_conference, at.logo_url AS away_team_logo_url
@@ -82,6 +86,24 @@ RETURNING *;
 -- against CFBD, not the joined team names GetGameByIDWithTeams carries for
 -- API responses.
 SELECT * FROM games WHERE id = sqlc.arg(id);
+
+-- name: UpdateGameLiveState :exec
+-- Backs internal/schedule.Service.RefreshLiveScores. Deliberately only
+-- touches the live_* columns (see migration 00009's doc comment) — never
+-- status/home_score/away_score/winner_team_id, which stay exclusively
+-- owned by the existing CFBD /games sync path that grading depends on.
+-- :exec (not :one) since a scoreboard row with no matching external_id in
+-- our games table — not every CFBD scoreboard game is one we track — is
+-- a silent no-op, not an error; the caller doesn't need the updated row
+-- back.
+UPDATE games SET
+    live_status = sqlc.arg(live_status),
+    live_home_score = sqlc.arg(live_home_score),
+    live_away_score = sqlc.arg(live_away_score),
+    live_period = sqlc.arg(live_period),
+    live_clock = sqlc.arg(live_clock),
+    live_updated_at = now()
+WHERE external_id = sqlc.arg(external_id);
 
 -- name: GetGameByExternalID :one
 -- Backs SyncPredictions: resolves CFBD's win-probability gameId against an

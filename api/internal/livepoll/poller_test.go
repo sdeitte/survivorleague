@@ -76,17 +76,22 @@ func createTestUser(t *testing.T, q *gen.Queries, label string) gen.User {
 type mockCFBDServer struct {
 	server *httptest.Server
 
-	mu                                 sync.Mutex
-	teamsJSON, calendarJSON, gamesJSON string
+	mu                                                 sync.Mutex
+	teamsJSON, calendarJSON, gamesJSON, scoreboardJSON string
 }
 
 func newMockCFBDServer(t *testing.T) *mockCFBDServer {
 	t.Helper()
-	m := &mockCFBDServer{}
+	// scoreboardJSON defaults to an empty array: RefreshLiveScores (called
+	// every tick once any week enters its live window — see poller.go)
+	// needs a well-formed response even when a test has nothing live-score-
+	// specific to assert, same as every other endpoint here.
+	m := &mockCFBDServer{scoreboardJSON: "[]"}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/teams/fbs", func(w http.ResponseWriter, r *http.Request) { m.serve(w, &m.teamsJSON) })
 	mux.HandleFunc("/calendar", func(w http.ResponseWriter, r *http.Request) { m.serve(w, &m.calendarJSON) })
 	mux.HandleFunc("/games", func(w http.ResponseWriter, r *http.Request) { m.serve(w, &m.gamesJSON) })
+	mux.HandleFunc("/scoreboard", func(w http.ResponseWriter, r *http.Request) { m.serve(w, &m.scoreboardJSON) })
 	m.server = httptest.NewServer(mux)
 	t.Cleanup(m.server.Close)
 	return m
@@ -117,6 +122,24 @@ func (m *mockCFBDServer) setGames(json string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.gamesJSON = json
+}
+
+func (m *mockCFBDServer) setScoreboard(json string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.scoreboardJSON = json
+}
+
+// buildScoreboardJSON renders a single game's CFBD GET /scoreboard JSON —
+// the live-score feed's shape, distinct from buildGamesJSON's GET /games
+// shape (see cfbdScoreboardGame's doc comment in cfbd_types.go for why
+// they're separate CFBD endpoints with separate schemas).
+func buildScoreboardJSON(gameID, homeID, awayID, homePoints, awayPoints, period int, clock string) string {
+	return fmt.Sprintf(`[{
+  "id": %d, "status": "in_progress", "period": %d, "clock": %q,
+  "homeTeam": {"id": %d, "name": "Poll Home", "points": %d},
+  "awayTeam": {"id": %d, "name": "Poll Away", "points": %d}
+}]`, gameID, period, clock, homeID, homePoints, awayID, awayPoints)
 }
 
 func buildTeamsJSON(homeID, awayID int) string {
@@ -272,6 +295,41 @@ func TestPoller_RealTickerGradesGameOnceItGoesFinal(t *testing.T) {
 	}
 	if stillPending.Result != "pending" {
 		t.Fatalf("pick.Result while CFBD still reports the game in progress = %q, want %q (graded too early)", stillPending.Result, "pending")
+	}
+
+	// CFBD's live scoreboard now reports an in-progress score for this
+	// same game — confirm the real ticker's RefreshLiveScores call (not a
+	// direct service call) lands it on the game row, and that doing so
+	// does NOT touch the authoritative status/home_score/away_score
+	// columns grading just confirmed above are still untouched.
+	mock.setScoreboard(buildScoreboardJSON(gameExternalID, homeID, awayID, 14, 7, 2, "8:42"))
+	liveDeadline := time.Now().Add(5 * time.Second)
+	var liveGame gen.Game
+	for {
+		liveGame, err = q.GetGame(ctx, game.ID)
+		if err != nil {
+			t.Fatalf("GetGame (waiting for live score): %v", err)
+		}
+		if liveGame.LiveStatus.Valid {
+			break
+		}
+		if time.Now().After(liveDeadline) {
+			t.Fatal("timed out waiting for the live poll loop to pick up the live scoreboard")
+		}
+		time.Sleep(75 * time.Millisecond)
+	}
+	if liveGame.LiveStatus.String != "in_progress" {
+		t.Errorf("live_status = %q, want %q", liveGame.LiveStatus.String, "in_progress")
+	}
+	if !liveGame.LiveHomeScore.Valid || liveGame.LiveHomeScore.Int32 != 14 {
+		t.Errorf("live_home_score = %+v, want 14", liveGame.LiveHomeScore)
+	}
+	if !liveGame.LiveAwayScore.Valid || liveGame.LiveAwayScore.Int32 != 7 {
+		t.Errorf("live_away_score = %+v, want 7", liveGame.LiveAwayScore)
+	}
+	if liveGame.Status != "scheduled" || liveGame.HomeScore.Valid || liveGame.AwayScore.Valid {
+		t.Errorf("live score feed must never touch the authoritative status/home_score/away_score columns, got status=%q home_score=%+v away_score=%+v",
+			liveGame.Status, liveGame.HomeScore, liveGame.AwayScore)
 	}
 
 	// Now the mock CFBD server reports the game final — home team wins.

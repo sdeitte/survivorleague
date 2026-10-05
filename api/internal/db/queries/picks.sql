@@ -49,6 +49,20 @@ WHERE league_membership_id = sqlc.arg(league_membership_id) AND week_id != sqlc.
 -- doesn't need N+1 lookups. is_locked/is_used_elsewhere are computed by
 -- the service layer (the former against time.Now(), the latter against
 -- ListUsedTeamIDsForMembershipExcludingWeek's result), not this query.
+--
+-- game_status/home_score/away_score are the authoritative, grading-owned
+-- fields (NULL score until status='final' — see buildGameUpsertParams in
+-- sync.go); live_status/live_home_score/live_away_score/live_period/
+-- live_clock are the separate cosmetic in-progress feed (see migration
+-- 00009), present only while live_status='in_progress', never consulted
+-- for grading. Both pairs are selected as the raw home/away columns
+-- (NOT a (g.home_team_id = t.id)-style CASE) for the same two reasons
+-- is_home below is: (1) sqlc's nullability inference doesn't reliably
+-- mark a CASE/comparison-derived column as nullable through this join —
+-- see ListWeekRecapFactsForLeague's identical note — and (2) the service
+-- layer already has is_home in hand to compute "this team's own score"
+-- itself (picks.Service.ListAvailableTeams), the same pattern
+-- internal/recap's scoreString uses.
 SELECT
     t.id AS team_id,
     t.name AS team_name,
@@ -58,7 +72,15 @@ SELECT
     ot.logo_url AS opponent_logo_url,
     g.id AS game_id,
     g.kickoff_at AS kickoff_at,
-    (g.home_team_id = t.id) AS is_home
+    (g.home_team_id = t.id) AS is_home,
+    g.status AS game_status,
+    g.home_score AS home_score,
+    g.away_score AS away_score,
+    g.live_status AS live_status,
+    g.live_home_score AS live_home_score,
+    g.live_away_score AS live_away_score,
+    g.live_period AS live_period,
+    g.live_clock AS live_clock
 FROM teams t
 JOIN games g ON g.week_id = sqlc.arg(week_id) AND (g.home_team_id = t.id OR g.away_team_id = t.id)
 JOIN teams ot ON ot.id = (CASE WHEN g.home_team_id = t.id THEN g.away_team_id ELSE g.home_team_id END)

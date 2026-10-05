@@ -429,6 +429,14 @@ func pgInt4Ptr(v pgtype.Int4) *int32 {
 	return &value
 }
 
+func pgTextPtr(v pgtype.Text) *string {
+	if !v.Valid {
+		return nil
+	}
+	value := v.String
+	return &value
+}
+
 func pgUUIDStringOrEmpty(v pgtype.UUID) string {
 	if !v.Valid {
 		return ""
@@ -542,6 +550,24 @@ type availableTeamResponse struct {
 	Spread         *float64 `json:"spread,omitempty"`
 	SPPlusRank     *int32   `json:"sp_plus_rank,omitempty"`
 	OpponentSPRank *int32   `json:"opponent_sp_plus_rank,omitempty"`
+
+	// GameStatus is always present ("scheduled" | "final" — see
+	// buildGameUpsertParams in internal/schedule/sync.go). TeamScore/
+	// OpponentScore are the authoritative final score, present only once
+	// GameStatus == "final". LiveStatus/LiveTeamScore/LiveOpponentScore/
+	// LivePeriod/LiveClock are the separate cosmetic in-progress feed (see
+	// migration 00009's doc comment) — present only while LiveStatus ==
+	// "in_progress", and superseded by TeamScore/OpponentScore once the
+	// game actually goes final. Both score pairs are always this team's
+	// own perspective (never "home score first") — see picks.AvailableTeam.
+	GameStatus        string  `json:"game_status"`
+	TeamScore         *int32  `json:"team_score,omitempty"`
+	OpponentScore     *int32  `json:"opponent_score,omitempty"`
+	LiveStatus        *string `json:"live_status,omitempty"`
+	LiveTeamScore     *int32  `json:"live_team_score,omitempty"`
+	LiveOpponentScore *int32  `json:"live_opponent_score,omitempty"`
+	LivePeriod        *int32  `json:"live_period,omitempty"`
+	LiveClock         *string `json:"live_clock,omitempty"`
 }
 
 // availableTeamsResponse is the full response of GET .../available-teams:

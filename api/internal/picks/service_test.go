@@ -544,6 +544,80 @@ func TestService_ListAvailableTeams_MatchupStats(t *testing.T) {
 	}
 }
 
+// TestService_ListAvailableTeams_ScorePerspective is the regression test
+// for the live-score feature: TeamScore/OpponentScore (the authoritative
+// final score) and LiveTeamScore/LiveOpponentScore (the separate cosmetic
+// in-progress feed — see migration 00009's doc comment) must both be
+// reported from each row's OWN team's perspective, never "home score
+// first" — the same rule WinProbability/Spread already follow, confirmed
+// by TestService_ListAvailableTeams_MatchupStats above.
+func TestService_ListAvailableTeams_ScorePerspective(t *testing.T) {
+	f := newFixture(t, 48*time.Hour)
+	ctx := context.Background()
+
+	// gameA1 is teamA (home) vs oppX (away) — see newFixture's doc comment.
+	// Final score: home (teamA) 24, away (oppX) 17. Live (cosmetic) feed:
+	// home 14, away 10.
+	if _, err := f.env.q.UpsertGame(ctx, gen.UpsertGameParams{
+		ExternalID: f.gameA1.ExternalID,
+		WeekID:     f.gameA1.WeekID,
+		HomeTeamID: f.gameA1.HomeTeamID,
+		AwayTeamID: f.gameA1.AwayTeamID,
+		KickoffAt:  f.gameA1.KickoffAt,
+		Status:     "final",
+		HomeScore:  pgtype.Int4{Int32: 24, Valid: true},
+		AwayScore:  pgtype.Int4{Int32: 17, Valid: true},
+	}); err != nil {
+		t.Fatalf("UpsertGame (final score): %v", err)
+	}
+	if err := f.env.q.UpdateGameLiveState(ctx, gen.UpdateGameLiveStateParams{
+		ExternalID:    f.gameA1.ExternalID,
+		LiveStatus:    pgtype.Text{String: "in_progress", Valid: true},
+		LiveHomeScore: pgtype.Int4{Int32: 14, Valid: true},
+		LiveAwayScore: pgtype.Int4{Int32: 10, Valid: true},
+	}); err != nil {
+		t.Fatalf("UpdateGameLiveState: %v", err)
+	}
+
+	if _, err := f.env.picks.UpsertPick(ctx, f.member.ID, f.week1.ID, f.league.Conference, f.gameA1.ID, f.teamA.ID); err != nil {
+		t.Fatalf("commissioner's pick: %v", err)
+	}
+
+	teams, _, _, err := f.env.picks.ListAvailableTeams(ctx, f.member.ID, f.week1.ID, f.league.Conference, f.league.SeasonYear)
+	if err != nil {
+		t.Fatalf("ListAvailableTeams: %v", err)
+	}
+
+	var teamA, oppX *AvailableTeam
+	for i := range teams {
+		switch {
+		case teams[i].Row.TeamID == f.teamA.ID && teams[i].Row.GameID == f.gameA1.ID:
+			teamA = &teams[i]
+		case teams[i].Row.TeamID == f.oppX.ID && teams[i].Row.GameID == f.gameA1.ID:
+			oppX = &teams[i]
+		}
+	}
+	if teamA == nil || oppX == nil {
+		t.Fatalf("expected both teamA and oppX rows for gameA1, got %+v", teams)
+	}
+
+	if teamA.TeamScore == nil || *teamA.TeamScore != 24 || teamA.OpponentScore == nil || *teamA.OpponentScore != 17 {
+		t.Errorf("teamA (home) final score = %v/%v, want 24/17", teamA.TeamScore, teamA.OpponentScore)
+	}
+	if oppX.TeamScore == nil || *oppX.TeamScore != 17 || oppX.OpponentScore == nil || *oppX.OpponentScore != 24 {
+		t.Errorf("oppX (away) final score = %v/%v, want 17/24 (flipped relative to the home team's)", oppX.TeamScore, oppX.OpponentScore)
+	}
+	if teamA.LiveTeamScore == nil || *teamA.LiveTeamScore != 14 || teamA.LiveOpponentScore == nil || *teamA.LiveOpponentScore != 10 {
+		t.Errorf("teamA (home) live score = %v/%v, want 14/10", teamA.LiveTeamScore, teamA.LiveOpponentScore)
+	}
+	if oppX.LiveTeamScore == nil || *oppX.LiveTeamScore != 10 || oppX.LiveOpponentScore == nil || *oppX.LiveOpponentScore != 14 {
+		t.Errorf("oppX (away) live score = %v/%v, want 10/14 (flipped)", oppX.LiveTeamScore, oppX.LiveOpponentScore)
+	}
+	if teamA.Row.GameStatus != "final" {
+		t.Errorf("teamA.Row.GameStatus = %q, want %q", teamA.Row.GameStatus, "final")
+	}
+}
+
 // numericFromFloat64 mirrors internal/schedule's identical unexported
 // helper (pgtype.Numeric.Scan only accepts a string, not a float64) — kept
 // as a small test-only copy here rather than exporting schedule's version

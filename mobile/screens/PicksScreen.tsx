@@ -7,6 +7,49 @@ import { BrandWordmark } from '../components/BrandWordmark';
 import * as api from '../api';
 import { ApiError, type AvailableTeam, type Pick, type Week } from '../api';
 
+// ScoreBadge renders a team's score from whichever source currently has
+// one: the authoritative final score once game_status === 'final', else
+// the separate cosmetic live-score feed while live_status ===
+// 'in_progress' (see api.ts's AvailableTeam doc comment for why these are
+// two different fields, never both shown at once, and never affecting
+// pick grading). Renders nothing before kickoff or while a game has
+// started but no score has synced yet — callers fall back to showing
+// "Locked" themselves in that case. Mirrors web/src/routes/PicksPage.tsx's
+// identical ScoreBadge.
+function ScoreBadge({ team, size = 'sm' }: { team: AvailableTeam; size?: 'sm' | 'lg' }) {
+  if (team.game_status === 'final' && team.team_score !== undefined && team.opponent_score !== undefined) {
+    const won = team.team_score > team.opponent_score;
+    return (
+      <View style={styles.scoreBadgeRow}>
+        <Text style={styles.scoreBadgeLabel}>FINAL</Text>
+        <Text style={[styles.scoreBadgeText, size === 'lg' && styles.scoreBadgeTextLg, won ? styles.scoreWin : styles.scoreLoss]}>
+          {team.team_score}–{team.opponent_score}
+        </Text>
+      </View>
+    );
+  }
+  if (team.live_status === 'in_progress' && team.live_team_score !== undefined && team.live_opponent_score !== undefined) {
+    return (
+      <View style={styles.scoreBadgeRow}>
+        <View style={styles.liveDot} />
+        <Text style={[styles.scoreBadgeText, size === 'lg' && styles.scoreBadgeTextLg, styles.scoreLive]}>
+          LIVE {team.live_team_score}–{team.live_opponent_score}
+        </Text>
+        {team.live_period !== undefined && team.live_clock && (
+          <Text style={styles.liveClockText}>
+            Q{team.live_period} {team.live_clock}
+          </Text>
+        )}
+      </View>
+    );
+  }
+  return null;
+}
+
+function hasScoreToShow(team: AvailableTeam): boolean {
+  return team.game_status === 'final' || team.live_status === 'in_progress';
+}
+
 // The weekly picks screen — this was the old app's most complex screen too
 // (its Pick.js was 639 lines). Mirrors web/src/routes/PicksPage.tsx's data
 // flow exactly (same endpoints, same server-computed lock/used flags, same
@@ -53,6 +96,16 @@ export function PicksScreen({ leagueId, onBack }: { leagueId: string; onBack: ()
     queryKey: ['league', leagueId, 'weeks', weekId, 'available-teams'],
     queryFn: () => authFetch((token) => api.getAvailableTeams(token, leagueId, weekId!)),
     enabled: !!weekId,
+    // Poll every 20s while at least one of this week's games has kicked
+    // off but isn't final yet — i.e. a score could still be changing.
+    // Everything else (games not yet started, or all of them final) is a
+    // static view and not worth repolling on a timer. Mirrors web's
+    // identical PicksPage.tsx behavior.
+    refetchInterval: (query) => {
+      const teams = query.state.data?.teams ?? [];
+      const mightBeLive = teams.some((t) => t.is_locked && t.game_status !== 'final');
+      return mightBeLive ? 20_000 : false;
+    },
   });
 
   // Every other week's own pick, used only to render "already used in
@@ -265,7 +318,13 @@ export function PicksScreen({ leagueId, onBack }: { leagueId: string; onBack: ()
                             minute: '2-digit',
                           })}
                         </Text>
-                        {pickedTeam.is_locked && <Text style={styles.currentPickLocked}>Locked</Text>}
+                        {hasScoreToShow(pickedTeam) ? (
+                          <View style={styles.currentPickScoreRow}>
+                            <ScoreBadge team={pickedTeam} size="lg" />
+                          </View>
+                        ) : (
+                          pickedTeam.is_locked && <Text style={styles.currentPickLocked}>Locked</Text>
+                        )}
                       </View>
                     </View>
                   ) : (
@@ -336,7 +395,13 @@ export function PicksScreen({ leagueId, onBack }: { leagueId: string; onBack: ()
                       </Text>
                     ) : null}
                   </View>
-                  {team.is_locked && <Text style={styles.lockedBadge}>Locked</Text>}
+                  {hasScoreToShow(team) ? (
+                    <View style={styles.teamRowScoreBadge}>
+                      <ScoreBadge team={team} />
+                    </View>
+                  ) : (
+                    team.is_locked && <Text style={styles.lockedBadge}>Locked</Text>
+                  )}
                 </Pressable>
               );
             })}
@@ -527,6 +592,50 @@ const styles = StyleSheet.create({
     color: '#64748b',
     fontSize: 12,
     marginTop: 2,
+  },
+  currentPickScoreRow: {
+    marginTop: 4,
+  },
+  scoreBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  scoreBadgeLabel: {
+    color: '#94a3b8',
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  scoreBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  scoreBadgeTextLg: {
+    fontSize: 16,
+  },
+  scoreWin: {
+    color: '#34d399',
+  },
+  scoreLoss: {
+    color: '#f87171',
+  },
+  scoreLive: {
+    color: '#fbbf24',
+  },
+  liveDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: '#fbbf24',
+  },
+  liveClockText: {
+    color: '#94a3b8',
+    fontSize: 11,
+  },
+  teamRowScoreBadge: {
+    flexShrink: 0,
+    marginLeft: 8,
   },
   currentPickRow: {
     flexDirection: 'row',

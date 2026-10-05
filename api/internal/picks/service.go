@@ -114,6 +114,20 @@ type AvailableTeam struct {
 	Spread         *float64
 	SPRank         *int32 // this team's SP+ ranking, if synced
 	OpponentSPRank *int32
+
+	// TeamScore/OpponentScore are the authoritative final score (nil until
+	// Row.GameStatus == "final"), and LiveTeamScore/LiveOpponentScore are
+	// the separate cosmetic in-progress feed (nil unless Row.LiveStatus ==
+	// "in_progress" — see migration 00009's doc comment) — both always
+	// from THIS team's own perspective, same "never home-first" rule as
+	// WinProbability/Spread above, computed here rather than in SQL for
+	// the same sqlc-nullability-inference reason Row.HomeScore/AwayScore/
+	// LiveHomeScore/LiveAwayScore are raw columns (see the query's own
+	// comment in picks.sql).
+	TeamScore         *int32
+	OpponentScore     *int32
+	LiveTeamScore     *int32
+	LiveOpponentScore *int32
 }
 
 // ListAvailableTeams returns every pickable team for the week (league's
@@ -182,6 +196,20 @@ func (s *Service) ListAvailableTeams(ctx context.Context, membershipID, weekID p
 		}
 		if rank, ok := spRankByTeam[row.OpponentTeamID]; ok {
 			at.OpponentSPRank = &rank
+		}
+		if row.HomeScore.Valid && row.AwayScore.Valid {
+			team, opponent := row.HomeScore.Int32, row.AwayScore.Int32
+			if !row.IsHome {
+				team, opponent = opponent, team
+			}
+			at.TeamScore, at.OpponentScore = &team, &opponent
+		}
+		if row.LiveHomeScore.Valid && row.LiveAwayScore.Valid {
+			team, opponent := row.LiveHomeScore.Int32, row.LiveAwayScore.Int32
+			if !row.IsHome {
+				team, opponent = opponent, team
+			}
+			at.LiveTeamScore, at.LiveOpponentScore = &team, &opponent
 		}
 		if pred, ok := predictionByGame[row.GameID]; ok {
 			if wp, err := pred.HomeWinProbability.Float64Value(); err == nil && wp.Valid {

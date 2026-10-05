@@ -54,7 +54,7 @@ func (q *Queries) EliminateMembership(ctx context.Context, arg EliminateMembersh
 
 const getGameForGradingForUpdate = `-- name: GetGameForGradingForUpdate :one
 
-SELECT id, external_id, week_id, home_team_id, away_team_id, kickoff_at, status, home_score, away_score, winner_team_id, graded_at, created_at, updated_at FROM games WHERE id = $1 FOR UPDATE
+SELECT id, external_id, week_id, home_team_id, away_team_id, kickoff_at, status, home_score, away_score, winner_team_id, graded_at, created_at, updated_at, live_status, live_home_score, live_away_score, live_period, live_clock, live_updated_at FROM games WHERE id = $1 FOR UPDATE
 `
 
 // Phase 5: grading/elimination pipeline queries. See internal/grading's
@@ -83,6 +83,12 @@ func (q *Queries) GetGameForGradingForUpdate(ctx context.Context, id pgtype.UUID
 		&i.GradedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LiveStatus,
+		&i.LiveHomeScore,
+		&i.LiveAwayScore,
+		&i.LivePeriod,
+		&i.LiveClock,
+		&i.LiveUpdatedAt,
 	)
 	return i, err
 }
@@ -216,7 +222,7 @@ func (q *Queries) ListActiveContestantMembershipsForLeague(ctx context.Context, 
 }
 
 const listConferenceRelevantGamesForWeek = `-- name: ListConferenceRelevantGamesForWeek :many
-SELECT g.id, g.external_id, g.week_id, g.home_team_id, g.away_team_id, g.kickoff_at, g.status, g.home_score, g.away_score, g.winner_team_id, g.graded_at, g.created_at, g.updated_at FROM games g
+SELECT g.id, g.external_id, g.week_id, g.home_team_id, g.away_team_id, g.kickoff_at, g.status, g.home_score, g.away_score, g.winner_team_id, g.graded_at, g.created_at, g.updated_at, g.live_status, g.live_home_score, g.live_away_score, g.live_period, g.live_clock, g.live_updated_at FROM games g
 JOIN teams ht ON ht.id = g.home_team_id
 JOIN teams at ON at.id = g.away_team_id
 WHERE g.week_id = $1
@@ -254,6 +260,12 @@ func (q *Queries) ListConferenceRelevantGamesForWeek(ctx context.Context, arg Li
 			&i.GradedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LiveStatus,
+			&i.LiveHomeScore,
+			&i.LiveAwayScore,
+			&i.LivePeriod,
+			&i.LiveClock,
+			&i.LiveUpdatedAt,
 		); err != nil {
 			return nil, err
 		}

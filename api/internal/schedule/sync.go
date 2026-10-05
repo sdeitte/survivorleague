@@ -25,6 +25,7 @@ type cfbdClient interface {
 	GetGamesForWeek(ctx context.Context, year, week int) ([]cfbdGame, error)
 	GetPregameWinProbabilities(ctx context.Context, year int) ([]cfbdPregameWinProbability, error)
 	GetSPRatings(ctx context.Context, year int) ([]cfbdTeamSP, error)
+	GetScoreboard(ctx context.Context) ([]cfbdScoreboardGame, error)
 }
 
 var _ cfbdClient = (*CFBDClient)(nil)
@@ -395,6 +396,84 @@ func (s *Service) SyncSPRatings(ctx context.Context, year int) (SPRatingSyncResu
 			return result, fmt.Errorf("schedule: upsert SP+ rating for %q: %w", row.Team, err)
 		}
 		result.Upserted++
+	}
+
+	return result, nil
+}
+
+// LiveScoreRefreshResult summarizes one RefreshLiveScores run.
+type LiveScoreRefreshResult struct {
+	Updated int
+	// Skipped counts a scoreboard row whose external_id doesn't match any
+	// game this app tracks — expected and common: GET /scoreboard returns
+	// every live/recent FBS game nationally, most of which belong to
+	// conferences/weeks no league here cares about.
+	Skipped int
+}
+
+// RefreshLiveScores pulls CFBD's live scoreboard (GET /scoreboard — "what's
+// on right now", not season-scoped like GetGames) and updates the live_*
+// columns (see migration 00009's doc comment) for every game CFBD reports
+// that this app already tracks. This is purely a cosmetic, user-facing
+// feed: it never writes status/home_score/away_score/winner_team_id —
+// those stay exclusively owned by the existing CFBD /games sync path that
+// grading depends on, so a glitch or ordering surprise in the live feed
+// can never affect grading/elimination.
+//
+// Called from the same livepoll tick that already runs RefreshWeek during
+// a game's live window (see cmd/server's wiring) — no separate scheduler,
+// since "there's a live game worth checking" is exactly the same
+// condition RefreshWeek already gates on.
+func (s *Service) RefreshLiveScores(ctx context.Context) (LiveScoreRefreshResult, error) {
+	var result LiveScoreRefreshResult
+
+	rows, err := s.cfbd.GetScoreboard(ctx)
+	if err != nil {
+		return result, fmt.Errorf("schedule: get scoreboard: %w", err)
+	}
+
+	for _, row := range rows {
+		externalID := fmt.Sprint(row.ID)
+
+		// Mirrors SyncPredictions's "look the game up by external_id
+		// first, skip (not error) on no match" pattern just above — most
+		// of CFBD's national scoreboard is for games/conferences no
+		// league here tracks.
+		if _, err := s.queries.GetGameByExternalID(ctx, externalID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				result.Skipped++
+				continue
+			}
+			return result, fmt.Errorf("schedule: get game %s for live score: %w", externalID, err)
+		}
+
+		var livePeriod pgtype.Int4
+		if row.Period != nil {
+			livePeriod = pgtype.Int4{Int32: int32(*row.Period), Valid: true}
+		}
+		var liveClock pgtype.Text
+		if row.Clock != nil {
+			liveClock = pgtype.Text{String: *row.Clock, Valid: true}
+		}
+		var liveHomeScore, liveAwayScore pgtype.Int4
+		if row.Home.Points != nil {
+			liveHomeScore = pgtype.Int4{Int32: int32(*row.Home.Points), Valid: true}
+		}
+		if row.Away.Points != nil {
+			liveAwayScore = pgtype.Int4{Int32: int32(*row.Away.Points), Valid: true}
+		}
+
+		if err := s.queries.UpdateGameLiveState(ctx, gen.UpdateGameLiveStateParams{
+			ExternalID:    externalID,
+			LiveStatus:    pgtype.Text{String: row.Status, Valid: row.Status != ""},
+			LiveHomeScore: liveHomeScore,
+			LiveAwayScore: liveAwayScore,
+			LivePeriod:    livePeriod,
+			LiveClock:     liveClock,
+		}); err != nil {
+			return result, fmt.Errorf("schedule: update live state for game %s: %w", externalID, err)
+		}
+		result.Updated++
 	}
 
 	return result, nil

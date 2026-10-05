@@ -534,6 +534,124 @@ func TestService_SyncSeason_NonFBSOpponentStoredAsStub(t *testing.T) {
 	}
 }
 
+// fakeScoreboardClient is a minimal cfbdClient fake for RefreshLiveScores
+// tests — simpler than retrofitting the shared httptest fixture server
+// (newFixtureCFBDServer/newMutableFixtureServer) with a fourth endpoint
+// those tests don't need, since RefreshLiveScores only ever calls
+// GetScoreboard; every other method here is unreachable in these tests.
+type fakeScoreboardClient struct {
+	rows []cfbdScoreboardGame
+	err  error
+}
+
+func (f *fakeScoreboardClient) GetFBSTeams(context.Context, int) ([]cfbdTeam, error) {
+	panic("not used")
+}
+func (f *fakeScoreboardClient) GetCalendar(context.Context, int) ([]cfbdCalendarWeek, error) {
+	panic("not used")
+}
+func (f *fakeScoreboardClient) GetGames(context.Context, int) ([]cfbdGame, error) { panic("not used") }
+func (f *fakeScoreboardClient) GetGamesForWeek(context.Context, int, int) ([]cfbdGame, error) {
+	panic("not used")
+}
+func (f *fakeScoreboardClient) GetPregameWinProbabilities(context.Context, int) ([]cfbdPregameWinProbability, error) {
+	panic("not used")
+}
+func (f *fakeScoreboardClient) GetSPRatings(context.Context, int) ([]cfbdTeamSP, error) {
+	panic("not used")
+}
+func (f *fakeScoreboardClient) GetScoreboard(context.Context) ([]cfbdScoreboardGame, error) {
+	return f.rows, f.err
+}
+
+// TestService_RefreshLiveScores_UpdatesMatchedGameOnly is the regression
+// test for the real feature this backs: a scoreboard row matching an
+// already-synced game's external_id gets its live_* columns updated, a
+// scoreboard row with no match (the common case — GET /scoreboard returns
+// every live FBS game nationally) is silently skipped, and critically the
+// authoritative status/home_score/away_score columns are never touched —
+// those stay exclusively owned by the GetGames/RefreshWeek sync path that
+// grading depends on (see migration 00009's doc comment).
+func TestService_RefreshLiveScores_UpdatesMatchedGameOnly(t *testing.T) {
+	q := newTestQueries(t)
+	year := uniqueSeasonYear()
+
+	fixture := newMutableFixtureServer(t, fixtureTeamsJSON, fixtureCalendarJSON, fixtureGamesJSON)
+	syncSvc := fixture.service(t, q)
+	if _, err := syncSvc.SyncSeason(context.Background(), year); err != nil {
+		t.Fatalf("SyncSeason: %v", err)
+	}
+
+	// Game 101 is fixtureGamesJSON's Ohio State vs Michigan matchup (see
+	// cfbd_client_test.go) — home=1 (Ohio State), away=2 (Michigan).
+	trackedGame, err := q.GetGameByExternalID(context.Background(), "101")
+	if err != nil {
+		t.Fatalf("GetGameByExternalID(101): %v", err)
+	}
+
+	period := 2
+	clock := "8:42"
+	homePts, awayPts := 14, 7
+	fake := &fakeScoreboardClient{rows: []cfbdScoreboardGame{
+		{
+			ID:     101, // matches the tracked game above
+			Status: "in_progress",
+			Period: &period,
+			Clock:  &clock,
+			Home:   cfbdScoreboardTeamPoints{ID: 1, Points: &homePts},
+			Away:   cfbdScoreboardTeamPoints{ID: 2, Points: &awayPts},
+		},
+		{
+			ID:     999999999, // no matching game — must be skipped, not error
+			Status: "completed",
+			Home:   cfbdScoreboardTeamPoints{ID: 1},
+			Away:   cfbdScoreboardTeamPoints{ID: 2},
+		},
+	}}
+
+	liveSvc := NewService(q, fake)
+	result, err := liveSvc.RefreshLiveScores(context.Background())
+	if err != nil {
+		t.Fatalf("RefreshLiveScores: %v", err)
+	}
+	if result.Updated != 1 {
+		t.Errorf("Updated = %d, want 1", result.Updated)
+	}
+	if result.Skipped != 1 {
+		t.Errorf("Skipped = %d, want 1", result.Skipped)
+	}
+
+	updated, err := q.GetGameByExternalID(context.Background(), "101")
+	if err != nil {
+		t.Fatalf("GetGameByExternalID(101) (after refresh): %v", err)
+	}
+	if !updated.LiveStatus.Valid || updated.LiveStatus.String != "in_progress" {
+		t.Errorf("live_status = %+v, want %q", updated.LiveStatus, "in_progress")
+	}
+	if !updated.LiveHomeScore.Valid || updated.LiveHomeScore.Int32 != 14 {
+		t.Errorf("live_home_score = %+v, want 14", updated.LiveHomeScore)
+	}
+	if !updated.LiveAwayScore.Valid || updated.LiveAwayScore.Int32 != 7 {
+		t.Errorf("live_away_score = %+v, want 7", updated.LiveAwayScore)
+	}
+	if !updated.LivePeriod.Valid || updated.LivePeriod.Int32 != 2 {
+		t.Errorf("live_period = %+v, want 2", updated.LivePeriod)
+	}
+	if !updated.LiveClock.Valid || updated.LiveClock.String != "8:42" {
+		t.Errorf("live_clock = %+v, want %q", updated.LiveClock, "8:42")
+	}
+
+	// The whole point: grading's authoritative columns must be completely
+	// untouched by this cosmetic feed.
+	if updated.Status != trackedGame.Status {
+		t.Errorf("status changed from %q to %q — RefreshLiveScores must never touch it", trackedGame.Status, updated.Status)
+	}
+	if updated.HomeScore != trackedGame.HomeScore || updated.AwayScore != trackedGame.AwayScore {
+		t.Errorf("home_score/away_score changed — RefreshLiveScores must never touch them (before=%+v/%+v, after=%+v/%+v)",
+			trackedGame.HomeScore, trackedGame.AwayScore, updated.HomeScore, updated.AwayScore)
+	}
+}
+
 // TestNormalizeConference_UnmappedNameIsSurfacedNotDropped exercises the
 // normalization table's fallback path directly (no DB/HTTP needed): a raw
 // CFBD conference string with no table entry is still stored (never

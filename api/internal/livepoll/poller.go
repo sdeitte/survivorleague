@@ -113,6 +113,15 @@ func (p *Poller) tick(ctx context.Context) error {
 		return nil // cheap no-op: no CFBD call this tick
 	}
 
+	// Refresh the cosmetic live-score feed (migration 00009) once per
+	// tick — not per week below, since GET /scoreboard isn't week-scoped,
+	// it's "what's on right now" nationally. Logged, not fatal: a live-
+	// score hiccup must never block the grading/finalization pass that
+	// follows.
+	if _, err := p.schedule.RefreshLiveScores(ctx); err != nil {
+		log.Printf("livepoll: refresh live scores: %v", err)
+	}
+
 	for _, w := range weeks {
 		result, err := p.schedule.RefreshWeek(ctx, int(w.SeasonYear), int(w.WeekNumber))
 		if err != nil {

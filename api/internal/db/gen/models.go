@@ -39,19 +39,25 @@ type EmailVerificationToken struct {
 }
 
 type Game struct {
-	ID           pgtype.UUID        `json:"id"`
-	ExternalID   string             `json:"external_id"`
-	WeekID       pgtype.UUID        `json:"week_id"`
-	HomeTeamID   pgtype.UUID        `json:"home_team_id"`
-	AwayTeamID   pgtype.UUID        `json:"away_team_id"`
-	KickoffAt    pgtype.Timestamptz `json:"kickoff_at"`
-	Status       string             `json:"status"`
-	HomeScore    pgtype.Int4        `json:"home_score"`
-	AwayScore    pgtype.Int4        `json:"away_score"`
-	WinnerTeamID pgtype.UUID        `json:"winner_team_id"`
-	GradedAt     pgtype.Timestamptz `json:"graded_at"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	ID            pgtype.UUID        `json:"id"`
+	ExternalID    string             `json:"external_id"`
+	WeekID        pgtype.UUID        `json:"week_id"`
+	HomeTeamID    pgtype.UUID        `json:"home_team_id"`
+	AwayTeamID    pgtype.UUID        `json:"away_team_id"`
+	KickoffAt     pgtype.Timestamptz `json:"kickoff_at"`
+	Status        string             `json:"status"`
+	HomeScore     pgtype.Int4        `json:"home_score"`
+	AwayScore     pgtype.Int4        `json:"away_score"`
+	WinnerTeamID  pgtype.UUID        `json:"winner_team_id"`
+	GradedAt      pgtype.Timestamptz `json:"graded_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	LiveStatus    pgtype.Text        `json:"live_status"`
+	LiveHomeScore pgtype.Int4        `json:"live_home_score"`
+	LiveAwayScore pgtype.Int4        `json:"live_away_score"`
+	LivePeriod    pgtype.Int4        `json:"live_period"`
+	LiveClock     pgtype.Text        `json:"live_clock"`
+	LiveUpdatedAt pgtype.Timestamptz `json:"live_updated_at"`
 }
 
 type GamePrediction struct {

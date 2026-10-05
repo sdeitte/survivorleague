@@ -79,6 +79,35 @@ type cfbdTeamSP struct {
 	Ranking *int    `json:"ranking"`
 }
 
+// cfbdScoreboardGame is CFBD's ScoreboardGame schema (GET /scoreboard) —
+// confirmed against the live OpenAPI spec. Distinct from cfbdGame/GET
+// /games: that bulk endpoint only ever reports a game as "not completed"
+// or "completed" with no in-progress score at all, which is why this
+// package's existing sync never had a way to show a score before a game
+// finishes. /scoreboard is CFBD's actual live-game feed — status, period,
+// and clock are populated while a game is in progress, not just at
+// kickoff/final. Trimmed to the fields internal/schedule.Service.
+// RefreshLiveScores needs; CFBD's real payload carries more (venue,
+// weather, betting, per-quarter line scores) that this feature has no use
+// for.
+type cfbdScoreboardGame struct {
+	ID     int                      `json:"id"`
+	Status string                   `json:"status"`
+	Period *int                     `json:"period"`
+	Clock  *string                  `json:"clock"`
+	Home   cfbdScoreboardTeamPoints `json:"homeTeam"`
+	Away   cfbdScoreboardTeamPoints `json:"awayTeam"`
+}
+
+// cfbdScoreboardTeamPoints is the per-side object nested in
+// cfbdScoreboardGame's homeTeam/awayTeam — trimmed to just the id (so a
+// scoreboard row can be matched back to one of OUR two team ids, since the
+// two sides aren't otherwise labeled) and points.
+type cfbdScoreboardTeamPoints struct {
+	ID     int  `json:"id"`
+	Points *int `json:"points"`
+}
+
 // seasonTypeRegular is the only CFBD seasonType this phase syncs — see the
 // plan's Phase 3 scope ("season games (regular season)"). Postseason/bowl
 // games are out of scope for now; also, the `weeks` table has no seasonType

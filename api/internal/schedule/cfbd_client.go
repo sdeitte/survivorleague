@@ -172,3 +172,19 @@ func (c *CFBDClient) GetSPRatings(ctx context.Context, year int) ([]cfbdTeamSP, 
 	}
 	return rows, nil
 }
+
+// GetScoreboard fetches CFBD's live scoreboard via GET /scoreboard —
+// every FBS game currently relevant "right now" (CFBD defaults this
+// endpoint to classification=fbs with no year/week parameter at all; it's
+// not a season-scoped bulk endpoint like GetGames, it's "what's on right
+// now/today"), with real in-progress status/period/clock/points unlike
+// GetGames's completed-or-not dichotomy. See RefreshLiveScores in sync.go
+// for how this is matched back to already-synced games and why it never
+// touches the status/home_score/away_score columns grading depends on.
+func (c *CFBDClient) GetScoreboard(ctx context.Context) ([]cfbdScoreboardGame, error) {
+	var games []cfbdScoreboardGame
+	if err := c.get(ctx, "/scoreboard", nil, &games); err != nil {
+		return nil, err
+	}
+	return games, nil
+}

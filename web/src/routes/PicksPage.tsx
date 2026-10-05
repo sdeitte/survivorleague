@@ -16,6 +16,48 @@ import {
   type Week,
 } from '../api'
 
+// ScoreBadge renders a team's score from whichever source currently has
+// one: the authoritative final score once game_status === 'final', else
+// the separate cosmetic live-score feed while live_status ===
+// 'in_progress' (see api.ts's AvailableTeam doc comment for why these are
+// two different fields, never both shown at once, and never affecting
+// pick grading). Renders nothing before kickoff or while a game has
+// started but no score has synced yet — callers fall back to showing
+// "Locked" themselves in that case.
+function ScoreBadge({ team, size = 'sm' }: { team: AvailableTeam; size?: 'sm' | 'lg' }) {
+  const text = size === 'lg' ? 'text-base' : 'text-xs'
+  if (team.game_status === 'final' && team.team_score !== undefined && team.opponent_score !== undefined) {
+    const won = team.team_score > team.opponent_score
+    return (
+      <span className={`inline-flex items-center gap-1.5 font-semibold ${text} ${won ? 'text-emerald-400' : 'text-red-400'}`}>
+        <span className="text-[10px] uppercase tracking-wide opacity-70">Final</span>
+        {team.team_score}–{team.opponent_score}
+      </span>
+    )
+  }
+  if (team.live_status === 'in_progress' && team.live_team_score !== undefined && team.live_opponent_score !== undefined) {
+    return (
+      <span className={`inline-flex items-center gap-1.5 font-semibold text-amber-400 ${text}`}>
+        <span className="relative flex h-2 w-2 shrink-0">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-400" />
+        </span>
+        LIVE {team.live_team_score}–{team.live_opponent_score}
+        {team.live_period !== undefined && team.live_clock && (
+          <span className="font-normal text-slate-400">
+            · Q{team.live_period} {team.live_clock}
+          </span>
+        )}
+      </span>
+    )
+  }
+  return null
+}
+
+function hasScoreToShow(team: AvailableTeam): boolean {
+  return team.game_status === 'final' || team.live_status === 'in_progress'
+}
+
 // The weekly picks screen — this was the old app's most complex screen too
 // (its Pick.js was 639 lines). Fetches available-teams for the selected
 // week (already filtered to the league's locked conference, already
@@ -68,6 +110,15 @@ export function PicksPage() {
     queryKey: ['league', id, 'weeks', weekId, 'available-teams'],
     queryFn: () => getAvailableTeams(id!, weekId!),
     enabled: !!id && !!weekId,
+    // Poll every 20s while at least one of this week's games has kicked
+    // off but isn't final yet — i.e. a score could still be changing.
+    // Everything else (games not yet started, or all of them final) is a
+    // static view and not worth repolling on a timer.
+    refetchInterval: (query) => {
+      const teams = query.state.data?.teams ?? []
+      const mightBeLive = teams.some((t) => t.is_locked && t.game_status !== 'final')
+      return mightBeLive ? 20_000 : false
+    },
   })
 
   // Every other week's own pick, used only to render a helpful "already
@@ -271,7 +322,13 @@ export function PicksPage() {
                               minute: '2-digit',
                             })}
                           </p>
-                          {pickedTeam.is_locked && <p className="text-xs text-slate-500 mt-1">Locked</p>}
+                          {hasScoreToShow(pickedTeam) ? (
+                            <div className="mt-1.5">
+                              <ScoreBadge team={pickedTeam} size="lg" />
+                            </div>
+                          ) : (
+                            pickedTeam.is_locked && <p className="text-xs text-slate-500 mt-1">Locked</p>
+                          )}
                         </div>
                       </div>
                     ) : (
@@ -352,7 +409,13 @@ export function PicksPage() {
                         </p>
                       </div>
                     </div>
-                    {team.is_locked && <span className="text-xs text-slate-500 shrink-0 ml-2">Locked</span>}
+                    {hasScoreToShow(team) ? (
+                      <span className="shrink-0 ml-2">
+                        <ScoreBadge team={team} />
+                      </span>
+                    ) : (
+                      team.is_locked && <span className="text-xs text-slate-500 shrink-0 ml-2">Locked</span>
+                    )}
                   </button>
                 )
               })}

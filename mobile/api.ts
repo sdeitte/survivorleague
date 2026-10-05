@@ -240,6 +240,23 @@ export interface AvailableTeam {
   spread?: number;
   sp_plus_rank?: number;
   opponent_sp_plus_rank?: number;
+
+  // Score fields — always from this team's own perspective (never
+  // "home score first"). game_status is always present ('scheduled' |
+  // 'final'); team_score/opponent_score (the authoritative final score)
+  // are present only once game_status === 'final'. live_status/
+  // live_team_score/live_opponent_score/live_period/live_clock are a
+  // separate, purely cosmetic in-progress feed — present only while
+  // live_status === 'in_progress', and superseded by team_score/
+  // opponent_score once the game actually goes final.
+  game_status: 'scheduled' | 'final';
+  team_score?: number;
+  opponent_score?: number;
+  live_status?: 'scheduled' | 'in_progress' | 'completed';
+  live_team_score?: number;
+  live_opponent_score?: number;
+  live_period?: number;
+  live_clock?: string;
 }
 
 export interface AvailableTeamsResponse {

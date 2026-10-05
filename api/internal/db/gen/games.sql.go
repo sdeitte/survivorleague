@@ -52,7 +52,7 @@ func (q *Queries) CountUnfinishedConferenceGamesForSeason(ctx context.Context, a
 }
 
 const getGame = `-- name: GetGame :one
-SELECT id, external_id, week_id, home_team_id, away_team_id, kickoff_at, status, home_score, away_score, winner_team_id, graded_at, created_at, updated_at FROM games WHERE id = $1
+SELECT id, external_id, week_id, home_team_id, away_team_id, kickoff_at, status, home_score, away_score, winner_team_id, graded_at, created_at, updated_at, live_status, live_home_score, live_away_score, live_period, live_clock, live_updated_at FROM games WHERE id = $1
 `
 
 // Plain (unjoined) single-game lookup — backs internal/schedule's
@@ -77,12 +77,18 @@ func (q *Queries) GetGame(ctx context.Context, id pgtype.UUID) (Game, error) {
 		&i.GradedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LiveStatus,
+		&i.LiveHomeScore,
+		&i.LiveAwayScore,
+		&i.LivePeriod,
+		&i.LiveClock,
+		&i.LiveUpdatedAt,
 	)
 	return i, err
 }
 
 const getGameByExternalID = `-- name: GetGameByExternalID :one
-SELECT id, external_id, week_id, home_team_id, away_team_id, kickoff_at, status, home_score, away_score, winner_team_id, graded_at, created_at, updated_at FROM games WHERE external_id = $1
+SELECT id, external_id, week_id, home_team_id, away_team_id, kickoff_at, status, home_score, away_score, winner_team_id, graded_at, created_at, updated_at, live_status, live_home_score, live_away_score, live_period, live_clock, live_updated_at FROM games WHERE external_id = $1
 `
 
 // Backs SyncPredictions: resolves CFBD's win-probability gameId against an
@@ -104,6 +110,12 @@ func (q *Queries) GetGameByExternalID(ctx context.Context, externalID string) (G
 		&i.GradedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LiveStatus,
+		&i.LiveHomeScore,
+		&i.LiveAwayScore,
+		&i.LivePeriod,
+		&i.LiveClock,
+		&i.LiveUpdatedAt,
 	)
 	return i, err
 }
@@ -112,6 +124,7 @@ const getGameByIDWithTeams = `-- name: GetGameByIDWithTeams :one
 SELECT
     g.id, g.external_id, g.week_id, g.home_team_id, g.away_team_id, g.kickoff_at,
     g.status, g.home_score, g.away_score, g.winner_team_id, g.graded_at,
+    g.live_status, g.live_home_score, g.live_away_score, g.live_period, g.live_clock,
     g.created_at, g.updated_at,
     ht.name AS home_team_name, ht.conference AS home_team_conference, ht.logo_url AS home_team_logo_url,
     at.name AS away_team_name, at.conference AS away_team_conference, at.logo_url AS away_team_logo_url
@@ -133,6 +146,11 @@ type GetGameByIDWithTeamsRow struct {
 	AwayScore          pgtype.Int4        `json:"away_score"`
 	WinnerTeamID       pgtype.UUID        `json:"winner_team_id"`
 	GradedAt           pgtype.Timestamptz `json:"graded_at"`
+	LiveStatus         pgtype.Text        `json:"live_status"`
+	LiveHomeScore      pgtype.Int4        `json:"live_home_score"`
+	LiveAwayScore      pgtype.Int4        `json:"live_away_score"`
+	LivePeriod         pgtype.Int4        `json:"live_period"`
+	LiveClock          pgtype.Text        `json:"live_clock"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	HomeTeamName       string             `json:"home_team_name"`
@@ -158,6 +176,11 @@ func (q *Queries) GetGameByIDWithTeams(ctx context.Context, id pgtype.UUID) (Get
 		&i.AwayScore,
 		&i.WinnerTeamID,
 		&i.GradedAt,
+		&i.LiveStatus,
+		&i.LiveHomeScore,
+		&i.LiveAwayScore,
+		&i.LivePeriod,
+		&i.LiveClock,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.HomeTeamName,
@@ -174,6 +197,7 @@ const listGamesByWeekWithTeams = `-- name: ListGamesByWeekWithTeams :many
 SELECT
     g.id, g.external_id, g.week_id, g.home_team_id, g.away_team_id, g.kickoff_at,
     g.status, g.home_score, g.away_score, g.winner_team_id, g.graded_at,
+    g.live_status, g.live_home_score, g.live_away_score, g.live_period, g.live_clock,
     g.created_at, g.updated_at,
     ht.name AS home_team_name, ht.conference AS home_team_conference, ht.logo_url AS home_team_logo_url,
     at.name AS away_team_name, at.conference AS away_team_conference, at.logo_url AS away_team_logo_url
@@ -196,6 +220,11 @@ type ListGamesByWeekWithTeamsRow struct {
 	AwayScore          pgtype.Int4        `json:"away_score"`
 	WinnerTeamID       pgtype.UUID        `json:"winner_team_id"`
 	GradedAt           pgtype.Timestamptz `json:"graded_at"`
+	LiveStatus         pgtype.Text        `json:"live_status"`
+	LiveHomeScore      pgtype.Int4        `json:"live_home_score"`
+	LiveAwayScore      pgtype.Int4        `json:"live_away_score"`
+	LivePeriod         pgtype.Int4        `json:"live_period"`
+	LiveClock          pgtype.Text        `json:"live_clock"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	HomeTeamName       string             `json:"home_team_name"`
@@ -207,7 +236,9 @@ type ListGamesByWeekWithTeamsRow struct {
 }
 
 // Joined with both teams' name/conference/logo so clients don't need N+1
-// lookups per the GET /weeks/:id/games contract.
+// lookups per the GET /weeks/:id/games contract. live_* columns are the
+// cosmetic in-progress score feed (see migration 00009) — status/
+// home_score/away_score remain the authoritative, grading-owned fields.
 func (q *Queries) ListGamesByWeekWithTeams(ctx context.Context, weekID pgtype.UUID) ([]ListGamesByWeekWithTeamsRow, error) {
 	rows, err := q.db.Query(ctx, listGamesByWeekWithTeams, weekID)
 	if err != nil {
@@ -229,6 +260,11 @@ func (q *Queries) ListGamesByWeekWithTeams(ctx context.Context, weekID pgtype.UU
 			&i.AwayScore,
 			&i.WinnerTeamID,
 			&i.GradedAt,
+			&i.LiveStatus,
+			&i.LiveHomeScore,
+			&i.LiveAwayScore,
+			&i.LivePeriod,
+			&i.LiveClock,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.HomeTeamName,
@@ -258,7 +294,7 @@ UPDATE games SET
     graded_at = NULL,
     updated_at = now()
 WHERE id = $5
-RETURNING id, external_id, week_id, home_team_id, away_team_id, kickoff_at, status, home_score, away_score, winner_team_id, graded_at, created_at, updated_at
+RETURNING id, external_id, week_id, home_team_id, away_team_id, kickoff_at, status, home_score, away_score, winner_team_id, graded_at, created_at, updated_at, live_status, live_home_score, live_away_score, live_period, live_clock, live_updated_at
 `
 
 type SeedFinalizeGameParams struct {
@@ -304,8 +340,54 @@ func (q *Queries) SeedFinalizeGame(ctx context.Context, arg SeedFinalizeGamePara
 		&i.GradedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LiveStatus,
+		&i.LiveHomeScore,
+		&i.LiveAwayScore,
+		&i.LivePeriod,
+		&i.LiveClock,
+		&i.LiveUpdatedAt,
 	)
 	return i, err
+}
+
+const updateGameLiveState = `-- name: UpdateGameLiveState :exec
+UPDATE games SET
+    live_status = $1,
+    live_home_score = $2,
+    live_away_score = $3,
+    live_period = $4,
+    live_clock = $5,
+    live_updated_at = now()
+WHERE external_id = $6
+`
+
+type UpdateGameLiveStateParams struct {
+	LiveStatus    pgtype.Text `json:"live_status"`
+	LiveHomeScore pgtype.Int4 `json:"live_home_score"`
+	LiveAwayScore pgtype.Int4 `json:"live_away_score"`
+	LivePeriod    pgtype.Int4 `json:"live_period"`
+	LiveClock     pgtype.Text `json:"live_clock"`
+	ExternalID    string      `json:"external_id"`
+}
+
+// Backs internal/schedule.Service.RefreshLiveScores. Deliberately only
+// touches the live_* columns (see migration 00009's doc comment) — never
+// status/home_score/away_score/winner_team_id, which stay exclusively
+// owned by the existing CFBD /games sync path that grading depends on.
+// :exec (not :one) since a scoreboard row with no matching external_id in
+// our games table — not every CFBD scoreboard game is one we track — is
+// a silent no-op, not an error; the caller doesn't need the updated row
+// back.
+func (q *Queries) UpdateGameLiveState(ctx context.Context, arg UpdateGameLiveStateParams) error {
+	_, err := q.db.Exec(ctx, updateGameLiveState,
+		arg.LiveStatus,
+		arg.LiveHomeScore,
+		arg.LiveAwayScore,
+		arg.LivePeriod,
+		arg.LiveClock,
+		arg.ExternalID,
+	)
+	return err
 }
 
 const upsertGame = `-- name: UpsertGame :one
@@ -327,7 +409,7 @@ ON CONFLICT (external_id) DO UPDATE SET
     away_score = EXCLUDED.away_score,
     winner_team_id = EXCLUDED.winner_team_id,
     updated_at = now()
-RETURNING id, external_id, week_id, home_team_id, away_team_id, kickoff_at, status, home_score, away_score, winner_team_id, graded_at, created_at, updated_at
+RETURNING id, external_id, week_id, home_team_id, away_team_id, kickoff_at, status, home_score, away_score, winner_team_id, graded_at, created_at, updated_at, live_status, live_home_score, live_away_score, live_period, live_clock, live_updated_at
 `
 
 type UpsertGameParams struct {
@@ -374,6 +456,12 @@ func (q *Queries) UpsertGame(ctx context.Context, arg UpsertGameParams) (Game, e
 		&i.GradedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LiveStatus,
+		&i.LiveHomeScore,
+		&i.LiveAwayScore,
+		&i.LivePeriod,
+		&i.LiveClock,
+		&i.LiveUpdatedAt,
 	)
 	return i, err
 }
