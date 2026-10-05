@@ -54,6 +54,7 @@ LEFT JOIN games g ON g.id = p.game_id
 LEFT JOIN teams t ON t.id = p.team_id
 LEFT JOIN teams ot ON ot.id = (CASE WHEN g.home_team_id = p.team_id THEN g.away_team_id ELSE g.home_team_id END)
 WHERE m.league_id = $2 AND m.removed_at IS NULL
+  AND (m.status = 'active' OR m.eliminated_week_id = $1)
 ORDER BY u.display_name ASC
 `
 
@@ -77,12 +78,23 @@ type ListWeekRecapFactsForLeagueRow struct {
 }
 
 // Everything internal/recap needs to build one week's prompt facts for a
-// league, in one query: every non-removed member (picked or not — a NULL
-// pick_result/team_name means they missed their pick, itself a fact worth
-// the recap knowing), their pick's team/opponent/final score, and whether
-// THIS week is the one that eliminated them (compare eliminated_week_id
-// to the week being recapped — a membership eliminated in an EARLIER week
-// is simply not this week's news).
+// league, in one query: every member still "in it" as of this week
+// (picked or not — a NULL pick_result/team_name means they missed their
+// pick, itself a fact worth the recap knowing), their pick's team/
+// opponent/final score, and whether THIS week is the one that eliminated
+// them.
+//
+// "Still in it as of this week" = status='active' (currently playing,
+// whether never eliminated or bought back and active again) OR
+// eliminated_week_id = this week (eliminated THIS week — still this
+// week's news even though status is now 'eliminated'). A membership
+// eliminated in an EARLIER week and not since bought back (status=
+// 'eliminated', eliminated_week_id pointing at that earlier week) is
+// excluded entirely — they're not part of this week's action, and
+// including them produced confusing "did not make a pick this week"
+// lines in the AI recap for players who'd been out of the league for
+// weeks (a real production bug, fixed here — see internal/recap's
+// package doc comment).
 //
 // home_team_id is selected as the raw nullable column, NOT a
 // (g.home_team_id = p.team_id) derived boolean — sqlc's nullability

@@ -149,6 +149,103 @@ func TestService_GenerateWeekRecap_StoresAndRetrieves(t *testing.T) {
 	}
 }
 
+// TestService_GenerateWeekRecap_ExcludesMembersEliminatedInEarlierWeeks is
+// the regression test for a real production bug: the recap's fact query
+// used to include every non-removed membership regardless of elimination
+// status, so a member eliminated weeks ago (and never bought back) still
+// showed up in the prompt as "did not make a pick this week" — confusing
+// noise about someone no longer actually in the league. Only a member
+// still "in it" as of the week being recapped (currently active — never
+// eliminated, or bought back and active again — or eliminated THIS week)
+// should appear.
+func TestService_GenerateWeekRecap_ExcludesMembersEliminatedInEarlierWeeks(t *testing.T) {
+	q, pool := newTestQueries(t)
+	ctx := context.Background()
+	leaguesSvc := leagues.NewService(q, pool)
+
+	commissioner := createRecapTestUser(t, q, "Alice")
+	league, _, err := leaguesSvc.CreateLeague(ctx, commissioner.ID, "Exclusion Test League", 2026, "Big Ten", "Alice Team")
+	if err != nil {
+		t.Fatalf("CreateLeague: %v", err)
+	}
+
+	bobUser := createRecapTestUser(t, q, "Bob")
+	bob, err := leaguesSvc.JoinByCode(ctx, league.ID, bobUser.ID, "Bob Team")
+	if err != nil {
+		t.Fatalf("JoinByCode (Bob): %v", err)
+	}
+	carolUser := createRecapTestUser(t, q, "Carol")
+	carol, err := leaguesSvc.JoinByCode(ctx, league.ID, carolUser.ID, "Carol Team")
+	if err != nil {
+		t.Fatalf("JoinByCode (Carol): %v", err)
+	}
+	daveUser := createRecapTestUser(t, q, "Dave")
+	dave, err := leaguesSvc.JoinByCode(ctx, league.ID, daveUser.ID, "Dave Team")
+	if err != nil {
+		t.Fatalf("JoinByCode (Dave): %v", err)
+	}
+
+	seasonYear := int32(96000 + int(nextRecapTestID()%4000))
+	earlierWeek, err := q.UpsertWeek(ctx, gen.UpsertWeekParams{SeasonYear: seasonYear, WeekNumber: 1})
+	if err != nil {
+		t.Fatalf("UpsertWeek (earlier): %v", err)
+	}
+	recapWeek, err := q.UpsertWeek(ctx, gen.UpsertWeekParams{SeasonYear: seasonYear, WeekNumber: 2})
+	if err != nil {
+		t.Fatalf("UpsertWeek (recap week): %v", err)
+	}
+
+	// Bob: eliminated THIS week (recapWeek) — still this week's news,
+	// must appear.
+	if _, err := q.EliminateMembership(ctx, gen.EliminateMembershipParams{ID: bob.ID, WeekID: recapWeek.ID}); err != nil {
+		t.Fatalf("EliminateMembership (Bob): %v", err)
+	}
+	// Carol: eliminated in an EARLIER week, never bought back — long gone,
+	// must NOT appear.
+	if _, err := q.EliminateMembership(ctx, gen.EliminateMembershipParams{ID: carol.ID, WeekID: earlierWeek.ID}); err != nil {
+		t.Fatalf("EliminateMembership (Carol): %v", err)
+	}
+	// Dave: eliminated in an EARLIER week, then bought back — currently
+	// active again, must appear despite eliminated_week_id still pointing
+	// at that earlier week (BuyBackMembership deliberately leaves it
+	// untouched as history).
+	if _, err := q.EliminateMembership(ctx, gen.EliminateMembershipParams{ID: dave.ID, WeekID: earlierWeek.ID}); err != nil {
+		t.Fatalf("EliminateMembership (Dave): %v", err)
+	}
+	if _, err := q.BuyBackMembership(ctx, gen.BuyBackMembershipParams{ID: dave.ID, LeagueID: league.ID, BoughtBackBy: commissioner.ID}); err != nil {
+		t.Fatalf("BuyBackMembership (Dave): %v", err)
+	}
+
+	fake := &fakeTextGenerator{text: "recap body"}
+	svc := NewService(q, fake)
+	if err := svc.GenerateWeekRecap(ctx, league.ID, recapWeek.ID); err != nil {
+		t.Fatalf("GenerateWeekRecap: %v", err)
+	}
+
+	// Scope the exclusion check to the "This week's picks and results"
+	// section specifically — the separate "Current standings" section
+	// (fed by ListLeaderboardForLeague, a different query entirely) is
+	// deliberately the full season's elimination history ("eliminated
+	// members in order of how long they lasted"), so Carol legitimately
+	// still appears there. The bug, and the fix, is about this week's
+	// action list, not the season-long standings reference.
+	picksSection := fake.gotPrompt
+	if i := strings.Index(picksSection, "How the league's picks split"); i != -1 {
+		picksSection = picksSection[:i]
+	} else if i := strings.Index(picksSection, "Current standings"); i != -1 {
+		picksSection = picksSection[:i]
+	}
+
+	for _, want := range []string{"Alice", "Bob", "Dave"} {
+		if !strings.Contains(picksSection, want) {
+			t.Errorf("picks section missing %q (still in it as of this week):\n%s", want, picksSection)
+		}
+	}
+	if strings.Contains(picksSection, "Carol") {
+		t.Errorf("picks section mentions Carol (eliminated in an earlier week, never bought back — should be excluded):\n%s", picksSection)
+	}
+}
+
 func TestService_GetLatestRecap_NoneYet(t *testing.T) {
 	q, pool := newTestQueries(t)
 	ctx := context.Background()
